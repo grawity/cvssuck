@@ -237,7 +237,7 @@ class RCSLog
 	raise LogFormatError.new unless /^symbolic names:\n((?:\t.*\n)*)/ =~ header; symbolic_names = $1
 	tags = symbolic_names.split(/\n/).collect! {|l| l.split(/[\s:]+/)[1,2]}
 	raise LogFormatError.new unless /^keyword substitution: (.*)\n/ =~ header; keyword_substitution = $1
-	raise LogFormatError.new unless /^description:\n/ =~ header; description = $'
+	if /^description:\n/ =~ header; description = $'; else description = nil; end
 	yield RCSInfo.new(
 	  rcs_file,
 	  working_file,
@@ -346,6 +346,28 @@ class CVSWork
     tmpfile = self.run_cvs_stdout_file(*args)
     p "getlogs end" if $debug.include?(:hotspot)
     return tmpfile
+  end
+
+  def parselogs(since=nil)
+    tmpfile = nil
+    begin
+      tmpfile = self.getlogs(since)
+    rescue CVSCommandFailure
+      args = ["-Q", "log", "-h"]
+      tmpfile = self.run_cvs_stdout_file(*args)
+      RCSLog.parse_log(tmpfile) {|obj|
+	if obj.kind_of?(RCSInfo)
+	  rcsinfo = obj
+	  args = ["-Q", "log", rcsinfo.working_file]
+	  tmpfile2 = self.run_cvs_stdout_file(*args)
+	  RCSLog.parse_log(tmpfile2) {|obj| yield obj}
+	  File.unlink tmpfile2
+	end
+      }
+      return
+    end
+
+    RCSLog.parse_log(tmpfile) {|obj| yield obj}
   end
 
   def getsubdirs
@@ -608,7 +630,7 @@ class CVSMirror
   def update_directory(relpath, filter, since)
     rcsinfo = nil
     deltas = nil
-    RCSLog.parse_log(@work.getlogs(since)) {|obj|
+    @work.parselogs(since) {|obj|
       case obj
       when RCSInfo
 	rcsinfo = obj
