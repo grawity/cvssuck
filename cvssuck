@@ -19,6 +19,9 @@ end
 class CVSCommandFailure<Exception
 end
 
+class RCSCommandFailure<Exception
+end
+
 class CVSWork
   def initialize(cvsroot)
     @tmpdir = "/tmp/cvssuck-tmp-#{$$}"
@@ -63,22 +66,6 @@ class CVSWork
     return result
   end
 
-  def run_cvs_stdout(*args)
-    result = nil
-    r, w = IO.pipe
-    self.run_cvs_internal(Proc.new {
-	STDOUT.reopen(w)
-	#STDERR.reopen(open("/dev/null"))
-	r.close
-	w.close
-      }, *args) {
-      w.close
-      result = yield(r)
-      r.close
-    }
-    return result
-  end
-
   def run_cvs_stderr(*args)
     result = nil
     r, w = IO.pipe
@@ -99,16 +86,12 @@ class CVSWork
     tmpfile = self.tmpfilename
     self.run_cvs_internal(Proc.new {
 	STDOUT.reopen(open(tmpfile, "w"))
-	#STDERR.reopen(open("/dev/null"))
       }, *args)
     return tmpfile
   end
 
   def run_cvs(*args)
-    self.run_cvs_internal(Proc.new {
-	#STDOUT.reopen(open("/dev/null"))
-	#STDERR.reopen(open("/dev/null"))
-      }, *args)
+    self.run_cvs_internal(nil, *args)
   end
 
   def getlogs(since=nil)
@@ -128,13 +111,12 @@ class CVSWork
 
   def getrevision(rev, filename)
     # -kb is not suitable because it prevents delta transmission.
-    # -Q doesn't prevent the message `cvs server: warning: a is not (any longer) pertinent'.
     self.run_cvs("-Q", "update", "-ko", "-r#{rev}", filename)
     return "#{@workdir}/#{filename}"
   end
 
   def cleanup
-    system("/bin/rm -rf #{@tmpdir}")
+    system "/bin/rm", "-rf", @tmpdir
   end
 end
 
@@ -205,17 +187,16 @@ class CVSMirror
 
   def parse_rcsfile_log(rcsfile)
     tmprlog = @work.tmpfilename
-    command = "rlog #{rcsfile} > #{tmprlog}"
+    command = ["rlog", rcsfile]
     p command if $debug.include?(:command)
-    system(command)
+    child = fork {
+      STDOUT.reopen(open(tmprlog, "w"))
+      exec(*command)
+    }
+    Process.waitpid(child, nil)
+    raise RCSCommandFailure.new if $? != 0
     parse_log(tmprlog) {|obj| yield obj}
     File.unlink(tmprlog)
-  end
-
-  def collect_revisions(rcsfile)
-    revisions = []
-    self.parse_rcsfile_log(rcsfile) {|obj| revisions << obj.revision if obj.kind_of?(DeltaInfo)}
-    return revisions
   end
 
   def make_prefixdir(filename)
@@ -297,6 +278,20 @@ class CVSMirror
       yield
     ensure
       delete_read_lock_file(dir) if rlocked
+    end
+  end
+
+  def read_unlock(dir)
+    rlockd = true
+    begin
+      delete_read_lock_file(dir); rlocked = false
+      yield
+    ensure
+      disable_interrupt {
+	master_lock(dir)
+	create_read_lock_file(dir)
+	master_unlock(dir)
+      } unless rlocked
     end
   end
 
@@ -433,6 +428,7 @@ class CVSMirror
     command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
     p command if $debug.include?(:command)
     system *command
+    raise RCSCommandFailure.new if $? != 0
   end
 
   def checkin(rcsfile, rcsinfo, delta, tmpwork)
@@ -457,6 +453,7 @@ class CVSMirror
       tmpci]
     p command if $debug.include?(:command)
     system *command
+    raise RCSCommandFailure.new if $? != 0
     Dir.rmdir(tmpcidir)
   end
 
@@ -500,6 +497,7 @@ class CVSMirror
       disable_interrupt {
 	write_lock(@mirrordir + relpath) {
 	  system *command
+	  raise RCSCommandFailure.new if $? != 0
 	}
       }
     end
@@ -512,12 +510,22 @@ class CVSMirror
     }
     deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
 
+    tmpwork = nil
+    local_rcsinfo = nil
     deltas_to_checkin = []
     lock_to_checkin = {}
     read_lock(@mirrordir + relpath) {
       local_revisions = []
       if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	local_revisions = collect_revisions(local_rcsfile)
+	local_revisions = []
+	self.parse_rcsfile_log(local_rcsfile) {|obj|
+	  case obj
+	  when RCSInfo
+	    local_rcsinfo = obj
+	  when DeltaInfo
+	    local_revisions << obj.revision
+	  end
+	}
       end
       deltas.each {|delta|
 	checkinable?(local_revisions, delta.revision) {|lock_rev|
@@ -526,54 +534,20 @@ class CVSMirror
 	  local_revisions << delta.revision
 	}
       }
-    }
-
-    tmpwork = nil
-    deltas_to_checkin.each {|delta|
-      target = nil
-      if delta.state == 'dead'
-        target = '/dev/null'
-      else
-	target = tmpwork = @work.getrevision(delta.revision, rcsinfo.working_file)
+      if !deltas_to_checkin.empty?
+	read_unlock(@mirrordir + relpath) {
+	  deltas_to_checkin.each {|delta|
+	    tmpwork = update_delta(relpath, rcsinfo, delta, lock_to_checkin[delta]) || tmpwork
+	  }
+	}
+	if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
+	  parse_rcsfile_log(local_rcsfile) {|obj|
+	    local_rcsinfo = obj if obj.kind_of?(RCSInfo)
+	  }
+	end
       end
 
-      disable_interrupt {
-	write_lock(@mirrordir + relpath) {
-	  local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	  unless local_rcsfile
-	    if delta.state == 'dead'
-	      local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
-	    else
-	      local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
-	    end
-	  end
-
-	  rcs_lock(local_rcsfile, lock_to_checkin[delta]) if lock_to_checkin[delta] && FileTest.exist?(local_rcsfile)
-	  checkin(local_rcsfile, rcsinfo, delta, target)
-
-	  if trunk?(delta.revision)
-	    if delta.state == 'dead'
-	      local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
-	    else
-	      local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
-	    end
-	    if local_rcsfile != local_rcsfile_new
-	      make_prefixdir(local_rcsfile_new)
-	      p "#{local_rcsfile} -> #{local_rcsfile_new}"
-	      File.rename(local_rcsfile, local_rcsfile_new)
-	      local_rcsfile = local_rcsfile_new
-	    end
-	  end
-	}
-      }
-    }
-
-    read_lock(@mirrordir + relpath) {
-      if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	local_rcsinfo = nil
-	parse_rcsfile_log(local_rcsfile) {|obj|
-	  local_rcsinfo = obj if obj.kind_of?(RCSInfo)
-	}
+      if local_rcsfile
 	update_rcs_attributes(relpath, local_rcsfile, rcsinfo, local_rcsinfo)
       end
     }
@@ -584,10 +558,51 @@ class CVSMirror
     end if tmpwork
   end
 
+  def update_delta(relpath, rcsinfo, delta, lock)
+    tmpwork = nil
+    target = nil
+    if delta.state == 'dead'
+      # xxx: /dev/null is not correct.  it should point to the previous revision checkouted from local rcsfile.
+      target = '/dev/null'
+    else
+      target = tmpwork = @work.getrevision(delta.revision, rcsinfo.working_file)
+    end
+
+    disable_interrupt {
+      write_lock(@mirrordir + relpath) {
+	local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
+	unless local_rcsfile
+	  if delta.state == 'dead'
+	    local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
+	  else
+	    local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
+	  end
+	end
+
+	rcs_lock(local_rcsfile, lock) if lock && FileTest.exist?(local_rcsfile)
+	checkin(local_rcsfile, rcsinfo, delta, target)
+
+	if trunk?(delta.revision)
+	  if delta.state == 'dead'
+	    local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
+	  else
+	    local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
+	  end
+	  if local_rcsfile != local_rcsfile_new
+	    make_prefixdir(local_rcsfile_new)
+	    print "rename: #{local_rcsfile} -> #{local_rcsfile_new}\n" if $debug.include?(:attic)
+	    File.rename(local_rcsfile, local_rcsfile_new)
+	  end
+	end
+      }
+    }
+    return tmpwork
+  end
+
 end
 
 $debug = []
-#$debug = [:command]
+$debug = [:command, :attic]
 
 c = CVSMirror.new(ARGV[0], ARGV[1], ARGV[2])
 c.update
