@@ -9,8 +9,8 @@ cvssuck.png: cvssuck.ppm
 cvssuck.ppm: cvssuck.ps
 	gs -q -dNOPAUSE \
 	  -sDEVICE=ppmraw -sOutputFile=cvssuck.ppm \
-	  -dGraphicsAlphaBits=4 -g600x180 \
-	  -c 2 2 scale -90 -650 translate -- \
+	  -dGraphicsAlphaBits=4 -g300x90 \
+	  -c -90 -650 translate -- \
 	  cvssuck.ps quit.ps 
 
 cvssuck.ps: cvssuck.sk
