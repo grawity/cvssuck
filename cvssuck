@@ -376,8 +376,8 @@ class CVSWork
       Process.waitpid(child, nil)
       yield $?, tmpout, tmperr
     ensure
-      File.unlink(tmpout) if !$debug.include?(:cvsout) && FileTest.exist?(tmpout)
-      File.unlink(tmperr) if !$debug.include?(:cvsout) && FileTest.exist?(tmperr)
+      File.unlink(tmpout) if (!$debug.include?(:cvsout) && FileTest.exist?(tmpout)) || FileTest.zero?(tmpout)
+      File.unlink(tmperr) if (!$debug.include?(:cvsout) && FileTest.exist?(tmperr)) || FileTest.zero?(tmperr)
       @tmpdir.free(tmpbase)
     end
   end
@@ -408,7 +408,10 @@ class CVSWork
 
   def parselogs(since=nil)
     tmpfile = nil
-    args = ["log"]
+    args = []
+    # -Q is not suitable because the message `... nothing known about ...' is diminished.
+    args << "-q" unless $debug.include?(:verbose)
+    args << "log"
     args << "-d#{since}<" if since
     run_cvs_internal(*args) {|status, out, err|
       if status == 256 && (line = grepfile(err, / nothing known about /))
@@ -433,7 +436,10 @@ class CVSWork
   def getrevision(filename, rev)
     discard_cache if @cache_filename != filename
     # -kb is not suitable because it prevents delta transmission.
-    self.run_cvs("update", "-ko", "-r#{rev}", filename)
+    args = []
+    args << "-Q" unless $debug.include?(:verbose)
+    args += ["update", "-ko", "-r#{rev}", filename]
+    self.run_cvs(*args)
     @cache_filename = filename
     @cache_path = "#{@workdir}/#{filename}"
     return @cache_path
@@ -1035,7 +1041,7 @@ def main
 
   $debug = []
   $debug = [:command, :attic, :cvsout]
-  #$debug = [:command, :attic, :protocollog, :cvsout]
+  #$debug = [:command, :attic, :protocollog, :cvsout, :verbose]
 
   parseArgs(2, nil, 'hs', 'o:')
   usage if 2 < ARGV.length
