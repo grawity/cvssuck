@@ -107,7 +107,7 @@ class CVSWork
   def run_cvs(*args)
     self.run_cvs_internal(Proc.new {
 	#STDOUT.reopen(open("/dev/null"))
-	STDERR.reopen(open("/dev/null"))
+	#STDERR.reopen(open("/dev/null"))
       }, *args)
   end
 
@@ -370,10 +370,13 @@ class CVSMirror
     end
   end
 
-  def checkinable?(local_rcsfile, rev)
+  def trunk?(rev)
+    return /\A(\d+)\.(\d+)\z/ =~ rev
+  end
+
+  def checkinable?(local_revisions, rev)
     lock_rev = nil
-    if local_rcsfile
-      @old_local_revisions = local_revisions = collect_revisions(local_rcsfile)
+    if local_revisions
       if /\A(\d+)\.(\d+)\z/ =~ rev
 	reva = [$1.to_i, $2.to_i]
 	# it's on a maintrunk.
@@ -508,15 +511,35 @@ class CVSMirror
       deltas_hash[delta.revision.split(/\./).collect! {|n| n.to_i}] = delta
     }
     deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
-      
-    @old_local_revisions = nil
+
+    deltas_to_checkin = []
+    lock_to_checkin = {}
+    read_lock(@mirrordir + relpath) {
+      local_revisions = []
+      if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
+	local_revisions = collect_revisions(local_rcsfile)
+      end
+      deltas.each {|delta|
+	checkinable?(local_revisions, delta.revision) {|lock_rev|
+	  lock_to_checkin[delta] = lock_rev
+	  deltas_to_checkin << delta
+	  local_revisions << delta.revision
+	}
+      }
+    }
+
     tmpwork = nil
-    deltas.each {|delta|
-      rev = delta.revision
-      next if @old_local_revisions && @old_local_revisions.include?(rev)
-      read_lock(@mirrordir + relpath) {
-	local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	checkinable?(local_rcsfile, rev) {|lock_rev|
+    deltas_to_checkin.each {|delta|
+      target = nil
+      if delta.state == 'dead'
+        target = '/dev/null'
+      else
+	target = tmpwork = @work.getrevision(delta.revision, rcsinfo.working_file)
+      end
+
+      disable_interrupt {
+	write_lock(@mirrordir + relpath) {
+	  local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
 	  unless local_rcsfile
 	    if delta.state == 'dead'
 	      local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
@@ -524,16 +547,23 @@ class CVSMirror
 	      local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
 	    end
 	  end
-	  tmpwork = @work.getrevision(rev, rcsinfo.working_file)
 
-	  #print "#{tmpwork} #{rev}\n"
+	  rcs_lock(local_rcsfile, lock_to_checkin[delta]) if lock_to_checkin[delta] && FileTest.exist?(local_rcsfile)
+	  checkin(local_rcsfile, rcsinfo, delta, target)
 
-	  disable_interrupt {
-	    write_lock(@mirrordir + relpath) {
-	      rcs_lock(local_rcsfile, lock_rev) if lock_rev
-	      checkin(local_rcsfile, rcsinfo, delta, tmpwork)
-	    }
-	  }
+	  if trunk?(delta.revision)
+	    if delta.state == 'dead'
+	      local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
+	    else
+	      local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
+	    end
+	    if local_rcsfile != local_rcsfile_new
+	      make_prefixdir(local_rcsfile_new)
+	      p "#{local_rcsfile} -> #{local_rcsfile_new}"
+	      File.rename(local_rcsfile, local_rcsfile_new)
+	      local_rcsfile = local_rcsfile_new
+	    end
+	  end
 	}
       }
     }
@@ -541,35 +571,10 @@ class CVSMirror
     read_lock(@mirrordir + relpath) {
       if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
 	local_rcsinfo = nil
-	head_delta = nil
-	in_attic = nil
 	parse_rcsfile_log(local_rcsfile) {|obj|
-	  case obj
-	  when RCSInfo
-	    local_rcsinfo = obj
-	  when DeltaInfo
-	    head_delta = obj if obj.revision == rcsinfo.head
-	  when NilClass
-	    in_attic = head_delta.state == 'dead'
-	  else
-	    raise Error.new
-	  end
+	  local_rcsinfo = obj if obj.kind_of?(RCSInfo)
 	}
-
 	update_rcs_attributes(relpath, local_rcsfile, rcsinfo, local_rcsinfo)
-
-	if in_attic
-	  local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
-	else
-	  local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
-	end
-	if local_rcsfile != local_rcsfile_new
-	  make_prefixdir(local_rcsfile_new)
-	  #print "#{local_rcsfile} -> #{local_rcsfile_new}\n"
-	  File.rename(local_rcsfile, local_rcsfile_new)
-	  local_rcsfile = local_rcsfile_new
-	end
-
       end
     }
 
