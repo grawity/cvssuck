@@ -383,7 +383,7 @@ class CVSWork
   def getrevision(rev, filename)
     discard_cache if @cache_filename != filename
     # -kb is not suitable because it prevents delta transmission.
-    self.run_cvs("-q", "update", "-ko", "-r#{rev}", filename)
+    self.run_cvs("-Q", "update", "-ko", "-r#{rev}", filename)
     @cache_filename = filename
     @cache_path = "#{@workdir}/#{filename}"
     return @cache_path
