@@ -930,6 +930,10 @@ class LocalFile
       @cache_revisions.checkinable?(rev) {
 	result = true
       }
+      # CVSsuck assumes that rcs files grows monotonicly.  i.e. Any revision
+      # doesn't removed.  Although the assumption makes CVSsuck faster, 
+      # `cvs admin -o' or `rcs -o' can invalidate the assumption.
+      # So, you shouldn't use them when CVSsuck is running.
       return result if result == false
     end
     @directory.read_lock {
