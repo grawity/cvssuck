@@ -739,6 +739,7 @@ def main
   $debug = [:command, :attic]
 
   parseArgs(2, nil, 'hs', 'o:')
+  usage if 2 < ARGV.length
 
   usage if $OPT_h
 
