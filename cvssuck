@@ -147,6 +147,7 @@ class Revision
   end
 
   def ==(other)
+    return false unless other.kind_of?(Revision)
     return @arr == other.arr
   end
 
@@ -1081,7 +1082,9 @@ module Planner
 	  result << r
 	end
       }
-      return result.keys.sort!
+      result = result.keys
+      result.sort!
+      return result
     end
   end
 end
