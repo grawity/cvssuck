@@ -1,6 +1,6 @@
 ** short term issue
 
-* introduce class Revision.
+* introduce class RevisionSet.
   (refine checkinable?)
 
 * incremental rcsfile attribute update.
