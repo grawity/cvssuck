@@ -121,11 +121,46 @@ assumes a lock directory is same as output directory.
 .SH EXAMPLES
 .B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"
 
-  This grabs the module
+grabs the module
 .B cvssuck
 in the repository
 .B :pserver:anonymous@cvs.m17n.org:/cvs/cvs
 into the directory
+.B cvssuck.
+
+.B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck cvs-info"
+
+grabs the modules
+.B cvssuck
+and
+.B cvs-info.
+
+.B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs -O $HOME/.cvsroot cvssuck"
+
+grabs the module
+.B cvssuck
+into
+.B $HOME/.cvsroot/cvssuck.
+
+.B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs -O $HOME/.cvsroot -L $HOME/.cvslock cvssuck"
+
+grabs the module
+.B cvssuck
+into
+.B $HOME/.cvsroot/cvssuck
+with the lock directory 
+.B $HOME/.cvslock/cvssuck.
+
+.B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs -o $HOME/.cvsroot/cvs/suck cvssuck"
+
+grabs the module
+.B cvssuck
+into
+.B $HOME/.cvsroot/cvs/suck.
+
+.B "% cvssuck -s :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"
+
+grabs a skeleton of the module
 .B cvssuck.
 
 .SH SEE ALSO
