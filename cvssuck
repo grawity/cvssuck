@@ -323,12 +323,11 @@ class RCSLog
   def RCSLog.parse_log(logfile)
     open(logfile) {|f|
       file_delimiter = "\n=============================================================================\n"
-      delta_delimiter = /\n----------------------------\n/
+      delta_delimiter = "\n----------------------------"
       while l = f.gets(file_delimiter)
-	if file_delimiter.length <= l.length && file_delimiter == l[l.length - file_delimiter.length, file_delimiter.length]
-	  l[l.length - file_delimiter.length, file_delimiter.length] = "\n"
-	end
-	header, *deltas = l.split(delta_delimiter)
+	l.chomp!(file_delimiter)
+	l.chomp!(delta_delimiter)
+	header, *deltas = l.split(/#{delta_delimiter}\n(?=revision )/o)
 	header << "\n" if header !~ /\n\z/
 	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
 	raise LogFormatError.new unless /^Working file: (?:.*\/)?(.*)\n/ =~ header; working_file = $1
