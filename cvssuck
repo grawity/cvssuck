@@ -298,7 +298,8 @@ class CVSWork
   end
 
   def run_cvs_internal(childproc, *args)
-    command = ["cvs", "-f", "-z3"] + args
+    #command = ["cvs", "-f", "-z3"] + args
+    command = ["cvs", "-f"] + args
     p command if $debug.include?(:command)
     child = fork {
       childproc.call if childproc
@@ -330,6 +331,7 @@ class CVSWork
   def run_cvs_stdout_file(*args)
     tmpfile = @tmpdir.genname
     self.run_cvs_internal(Proc.new {
+	ENV['CVS_CLIENT_LOG'] = tmpfile
 	STDOUT.reopen(open(tmpfile, "w"))
       }, *args)
     return tmpfile
