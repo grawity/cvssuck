@@ -39,9 +39,13 @@ def mkdir_prefix(filename)
 end
 
 def mkdir_recursive(filename)
-  return if FileTest.directory?(filename)
+  if FileTest.directory?(filename)
+    print "mkdir(\"#{filename}\") -> already exist\n" if $debug.include?(:mkdir_exist)
+    return
+  end
   begin
     Dir.mkdir(filename)
+    print "mkdir(\"#{filename}\") -> created\n" if $debug.include?(:mkdir)
   rescue Errno::ENOENT
     mkdir_recursive(filename.sub(/\/[^\/]*\z/, ''))
     retry
@@ -1074,7 +1078,7 @@ module Planner
   end
 end
 
-$debug_list = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp]
+$debug_list = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp, :mkdir, :mkdir_exist]
 
 def usage
   STDERR.print <<"End"
@@ -1096,8 +1100,6 @@ end
 
 def main
   $debug = []
-  #$debug = [:command, :attic, :cvsout, :leavetmp]
-  #$debug = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp]
 
   optionparser = GetoptLong.new(
     [GetoptLong::NO_ARGUMENT, '-h'],
