@@ -657,7 +657,6 @@ class CVSMirror
       p "planning begin #{tbeg = Time.now}" if $debug.include?(:hotspot)
       local_revisions = RevisionSet.new
       if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	local_revisions = []
 	self.parse_rcsfile_log(local_rcsfile) {|obj|
 	  case obj
 	  when RCSInfo
