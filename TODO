@@ -1,7 +1,5 @@
 ** short term issue
 
-* remove empty log of stdout/err
-
 * cache a result of rlog.
 
 * call rlog only once for each directory. 
