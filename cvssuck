@@ -1,5 +1,10 @@
 #!/usr/local/bin/ruby
 
+# cvsmirror - cvs repository mirroring tool via cvs client/server protocol
+
+# author:
+#  Tanaka Akira <akr@m17n.org>
+
 require "socket" # to use gethostname
 
 class CouldNotLock<Exception
