@@ -479,7 +479,7 @@ class CVSWork
     result = []
     self.run_cvs_stderr("update", "-r00", "-d", "-p", @subdir) {|f|
       f.each_line {|l|
-	result << $1 if / server: New directory `#{@subdir}\/(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
+	result << $1 if /: New directory `#{@subdir}\/(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
       }
     }
     return result
