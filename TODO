@@ -1,7 +1,5 @@
 ** short term issue
 
-* use Attic-ness of `RCS file:' field of log.
-
 * hide log getting from update_directory.
 (update_file should get itself.  Of course it should get logs in whole directory and cache it.)
 
@@ -34,6 +32,8 @@ double suffixed `-'s
 a-b-c	-> a-b-c
 a-b-c-	-> a-b-c--
 a-b-c--	-> a-b-c----
+
+* setup proper tag to refer translated main trunk.
 
 * create a logo
 
