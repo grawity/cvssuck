@@ -529,19 +529,15 @@ class LocalDirectory
   # locking interfaces:
   #
   # * read_lock {...} 
-  # * read_unlock {...} - can be used only in `read_lock'.
   # * write_lock {...}
 
   # for each directory, there are three states:
   #
   # * unlocked     - read_lock   -> read locked.
-  #                - read_unlock -> forbidden.
   #                - write_lock  -> write locked.
   # * read locked  - read_lock   -> read locked.
-  #                - read_unlock -> unlocked.
   #                - write_lock  -> write locked.
   # * write locked - read_lock   -> write locked.
-  #                - read_unlock -> forbidden.
   #                - write_lock  -> write locked.
 
   def unlocked?
@@ -681,30 +677,6 @@ class LocalDirectory
 	  @lockstate = :unlock
 	  @age += 1
 	}
-      end
-    end
-  end
-
-  def read_unlock
-    if @lockstate != :read_lock
-      raise InvalidUnlock.new
-    else
-      disable_interrupt
-      delete_read_lock
-      @lockstate = :unlock
-      @age += 1
-      begin
-        enable_interrupt
-	yield
-      ensure
-	try_lock {
-	  master_lock {
-	    create_read_lock
-	  }
-	  @lockstate = :read_lock
-	  @age += 1
-	}
-	enable_interrupt
       end
     end
   end
