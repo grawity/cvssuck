@@ -724,9 +724,10 @@ end
 
 def usage
   STDERR.print <<'End'
-usage: cvssuck [options] mirror-dir cvsroot module
+usage: cvssuck [options] cvsroot module
 option: -h : print help message
         -s : grab only root, branchpoint, tagged revision and heads of branches.
+	-o output-directory : specify output directory. (default: module)
 End
   exit 1
 end
@@ -737,13 +738,13 @@ def main
   $debug = []
   $debug = [:command, :attic]
 
-  parseArgs(3, nil, 'hs')
+  parseArgs(2, nil, 'hs', 'o:')
 
   usage if $OPT_h
 
-  mirrordir = ARGV[0]
-  cvsroot = ARGV[1]
-  mod = ARGV[2]
+  cvsroot = ARGV[0]
+  mod = ARGV[1]
+  mirrordir = $OPT_o || mod
 
   filter = $OPT_s ? Filter::Skeleton.new : Filter::All.new
 
