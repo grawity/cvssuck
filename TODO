@@ -8,7 +8,18 @@
 
 * support revision translation.
 
+a.b.c.d.e.... -> 1.1.(1000 + a).c.d.e...
+	      or 1.1.(999 + 2*a).c.d.e...
+
+1.1 is automatically generated as empty contents if it is not exist yet.
+
 * support tag translation.
+
+double suffixed `-'
+
+a-b-c	-> a-b-c
+a-b-c-	-> a-b-c--
+a-b-c--	-> a-b-c----
 
 ** long term issue
 

@@ -16,6 +16,9 @@ end
 class InvalidUnlock<Exception
 end
 
+class CVSCommandFailure<Exception
+end
+
 class CVSWork
   def initialize(cvsroot)
     @tmpdir = "/tmp/cvssuck-tmp-#{$$}"
@@ -54,6 +57,7 @@ class CVSWork
     }
     result = yield if iterator?
     Process.waitpid(child, nil)
+    raise CVSCommandFailure.new if $? != 0
     return result
   end
 
