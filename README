@@ -1,12 +1,12 @@
-** cvsmirror - retrieves cvs repository via cvs client/server protocol.
+** cvssuck - retrieves cvs repository via cvs client/server protocol.
 
 usage:
 
-% cvsmirror mirror-dir cvsroot module
+% cvssuck mirror-dir cvsroot module
 
 example:
 
-% cvsmirror $HOME/.cvsroot/non-jisx0208 :pserver:anonymous@cvs.m17n.org:/cvs/root non-jisx0208
+% cvssuck $HOME/.cvsroot/non-jisx0208 :pserver:anonymous@cvs.m17n.org:/cvs/root non-jisx0208
 
 requirement:
 

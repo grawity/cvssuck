@@ -1,6 +1,6 @@
 #!/usr/local/bin/ruby
 
-# cvsmirror - cvs repository mirroring tool via cvs client/server protocol
+# cvssuck - cvs repository retrieving tool via cvs client/server protocol
 
 # author:
 #  Tanaka Akira <akr@m17n.org>
@@ -18,7 +18,7 @@ end
 
 class CVSWork
   def initialize(cvsroot)
-    @tmpdir = "/tmp/cvs-mirror-tmp-#{$$}"
+    @tmpdir = "/tmp/cvssuck-tmp-#{$$}"
     @tmpcount = 0
     @workdir = "#{@tmpdir}/w"
     Dir.mkdir(@tmpdir, 0700)
