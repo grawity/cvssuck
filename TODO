@@ -29,9 +29,12 @@
 
 * support revision translation.
 
-a.b.c.d.e.... -> 1.1.(999 + 2*a).c.d.e...
+a.b.c.d.e.... -> 1.1.999.N.a.b.c.d.e....
 
-1.1 is automatically generated as empty contents if it is not exist yet.
+1.1 and 1.1.999.N is automatically generated as empty contents if it
+is not exist yet.
+
+N is a number to identify imported tree.
 
 * support tag translation.
 

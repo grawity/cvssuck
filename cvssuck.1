@@ -4,7 +4,8 @@ cvssuck \- inefficient cvs repository grabber via cvs client/server protocol
 .SH SYNOPSIS
 .B cvssuck
 .RB [ -s ]
-.RB [ -t ]
+.RB [ -t
+.IR trunk-tag ]
 .RB [ -o 
 .IR output-directory ]
 .I cvsroot module
@@ -23,8 +24,9 @@ should use it and don't use CVSsuck.
 
   CVSsuck can translate revision numbers and tags when mirroring.  For
 example, it can copy the revision 1.1 in remote repository to the
-revision 1.1.1001.1 in local repository.  This makes development with
-local repository possible.  In other words, CVSsuck can be used as
+revision 1.1.999.1.1.1 in local repository.
+This makes development with local repository possible.
+In other words, CVSsuck can be used as
 replacement of `cvs import'.  If CVSsuck is used instead, you can refer
 logs, original tags, revisions between releases, etc.
 
@@ -44,8 +46,9 @@ In this mode, CVSsuck grabs only
 first revision of the trunk, 1.1, branchpoints, head of branches and tagged revisions.
 Note that first two (first revision of the trunk and 1.1) is identical in usual case.
 .TP
-.B \-t
+.BI \-t " trunk-tag"
 specifies revision/tag translation mode.
+In the mode, CVSsuck translates revisions and tags.
 .SH EXAMPLES
 .B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"
 
