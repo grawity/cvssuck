@@ -1006,7 +1006,7 @@ class CVSSuck
       else
 	subdirs.reverse_each {|dir| queue.unshift(dir)}
       end
-      Process.wait fork {
+      Process.waitpid fork {
 	@tmpdir.flush_dirs
 	update_directory(relpath, since)
         exit! 0
