@@ -2,6 +2,17 @@
 
 # CVSsuck - cvs repository retrieving tool via cvs client/server protocol
 
+# usage:
+#
+# % cvssuck [-s] [-t] [-o output-directory] cvsroot module
+# 
+# -s : skeleton mode
+# -t : translation mode
+
+# example:
+#
+# % cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck
+
 # author:
 #  Tanaka Akira <akr@m17n.org>
 
