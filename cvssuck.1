@@ -8,19 +8,18 @@ cvssuck \- inefficient cvs repository grabber using cvs command
 .RB [ -h ]
 .RB [ -b ]
 .RB [ -s ]
-.RB [ -o 
-.IR output-directory ]
+.I cvsroot
+.RB [ -o
+.I output-directory\f1|\f3\-O
+.IR output-base ]
 .RB [ -l 
-.IR lock-directory ]
-.I cvsroot module
+.I lock-directory\f1|\f3\-L
+.IR lock-base ]
+.I module \f1...
 
 .SH DESCRIPTION
-  CVSsuck grabs
-.I module
-in 
-.IR cvsroot .
-
-  CVSsuck is a mirroring tool for cvs repositories.
+.B CVSsuck
+is a mirroring tool for cvs repositories.
 Unlike other tools such as CVSup or rsync,
 it uses cvs command to access the repository.
 So, it works well with remote repositories without
@@ -28,7 +27,8 @@ a special server or shell account.
 However it is inefficient because
 cvs client/server protocol is not designed for mirroring.
 If a server provides special way to grab a repository,
-you shouldn't use CVSsuck.
+you shouldn't use
+.BR CVSsuck .
 
 .SH OPTIONS
 .TP
@@ -37,34 +37,64 @@ prints help message.
 
 .TP
 .B \-b
-makes CVSsuck to traverse directories breadth first.
-The default is depth first traverse.
+makes
+.B CVSsuck
+to traverse directories in breadth first.
+.B CVSsuck
+traverses directory in depth first by default.
 
 .TP
 .B \-s
 specifies skeleton mode.
-In this mode, CVSsuck grabs only 
+In this mode,
+.B CVSsuck
+grabs only 
 first revision of the trunk, 1.1, branchpoints, head of branches and tagged revisions.
 Note that first two (first revision of the trunk and 1.1) is identical in usual case.
 
 .TP
 .BI \-o " output-directory"
-specifies output directory.
-The default is 
-.IR module .
+specifies the directory to store grabbed repository.
+A remote RCS file 
+.IR module / dir / file ,v
+in
+.I cvsroot
+will be stored in
+.IR output-directory / dir / file ,v.
+
+.TP
+.BI \-O " output-base"
+specifies the base directory to store grabbed repository.
+A remote RCS file 
+.IR module / dir / file ,v
+in
+.I cvsroot
+will be stored in
+.IR output-base / module / dir / file ,v.
+.B \-o
+and
+.B \-O
+is exclusive.
+By default,
+.B CVSsuck
+behaves as that current directory is specified with
+.BR \-O .
 
 .TP
 .BI \-l " lock-directory"
-specifies CVS style lock directory corresponding to
-.IR output-directory .
-The default is same as
-.I output-directory 
-(or
-.I moudle
-if the option
-.B \-o
-is not specified).
+specifies the directory of CVS style lock.
 
+.TP
+.BI \-L " lock-base"
+specifies the base directory of CVS style lock.
+.B \-l
+and
+.B \-L
+is exclusive.
+A lock directory should be specified after an output directory.
+By default,
+.B CVSsuck
+assumes a lock directory is same as output directory.
 
 .SH EXAMPLES
 .B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"

@@ -1,14 +1,19 @@
 #!/usr/local/bin/ruby
 
-## CVSsuck - cvs repository retrieving tool via cvs client/server protocol
+## CVSsuck - cvs repository mirroring tool using cvs command
 
 # usage:
 #
-# % cvssuck [-h] [-b] [-s] [-o output-directory] cvsroot module
+# % cvssuck [-h] [-b] [-s] cvsroot [-o output-directory|-O output-base] [-l lock-directory|-L lock-base] module ...
 # 
-# -h : print help
+# -h : print help message
 # -b : breadth first traverse mode
 # -s : skeleton mode
+
+# -o output-directory : module/dir/file,v -> output-directory/dir/file,v
+# -O output-base      : module/dir/file,v -> output-base/module/dir/file,v
+# -l lock-directory   : lock lock-directory/dir to access local RCS file.
+# -L lock-base        : lock lock-base/module/dir to access local RCS file.
 
 # example:
 #
@@ -17,10 +22,10 @@
 # author:
 #  Tanaka Akira <akr@m17n.org>
 
-require 'parsearg'
+require 'getoptlong'
 require 'weakref'
-require 'socket' # to use gethostname
 require 'fcntl'
+require 'socket' # to use gethostname
 
 def mkdir_prefix(filename)
   filename = filename.clone
@@ -492,17 +497,18 @@ class LocalRepository
 end
 
 class LocalDirectory
+  Info = ".#{Socket.gethostname}.#{$$}"
+
   attr_reader :repository, :rcsdir, :age
   def initialize(repository, rcsdir, lockdir)
     @repository = repository
     @file = {}
-    @info = ".#{Socket.gethostname}.#{$$}"
 
     @rcsdir = rcsdir
     @lockdir = lockdir
     @master_lock_file = "#{@lockdir}/\#cvs.lock"
-    @read_lock_file = "#{@lockdir}/\#cvs.rfl#{@info}"
-    @write_lock_file = "#{@lockdir}/\#cvs.wfl#{@info}"
+    @read_lock_file = "#{@lockdir}/\#cvs.rfl#{Info}"
+    @write_lock_file = "#{@lockdir}/\#cvs.wfl#{Info}"
 
     @lockstate = 'u'
     @age = 0
@@ -640,7 +646,7 @@ class LocalDirectory
   def check_read_lock
     Dir.foreach(@lockdir) {|f|
       if /\A\#cvs\.rfl/ =~ f
-	next if $' == @info
+	next if $' == Info
         raise LockFailure.new(@lockdir)
       end
     }
@@ -1104,33 +1110,77 @@ End
 end
 
 def main
-  $USAGE='usage'
-
   $debug = []
   $debug = [:command, :attic, :cvsout, :leavetmp]
   #$debug = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp]
 
-  parseArgs(2, nil, 'bhs', 'o:', 'l:')
-  usage if 2 < ARGV.length
+  optionparser = GetoptLong.new(
+    [GetoptLong::NO_ARGUMENT, '-h'],
+    [GetoptLong::NO_ARGUMENT, '-b'],
+    [GetoptLong::NO_ARGUMENT, '-s'],
+    [GetoptLong::REQUIRED_ARGUMENT, '-o'],
+    [GetoptLong::REQUIRED_ARGUMENT, '-O'],
+    [GetoptLong::REQUIRED_ARGUMENT, '-l'],
+    [GetoptLong::REQUIRED_ARGUMENT, '-L'])
+  optionparser.ordering=(GetoptLong::RETURN_IN_ORDER)
 
-  usage if $OPT_h
-
-  cvsroot = ARGV[0]
-  mod = ARGV[1]
-  topdir = $OPT_o || mod
-  lockdir = $OPT_l
-
+  cvsroot = nil
+  breadth_first = nil
   planner = Planner::Exact.new
-  if $OPT_s
-    planner = Planner::Skeleton.new(planner)
-  end
+  output_base = ''
+  output_directory = nil
+  lock_base = ''
+  lock_directory = nil
 
-  tmpdir = TempDir.new
-  sucker = CVSSuck.new(tmpdir, cvsroot, planner, topdir, lockdir)
+  queue = []
+  optionparser.each {|opt, arg|
+    if opt == ''
+      if cvsroot == nil
+	cvsroot = arg
+      else
+	mod = arg
+	out = output_directory || (output_base + mod)
+	lock = lock_directory || (lock_base + mod)
+	queue << [mod, out, lock]
+      end
+    elsif opt == '-h'
+      usage
+    elsif opt == '-b'
+      breadth_first = true
+    elsif opt == '-s'
+      planner = Planner::Skeleton.new(planner)
+    elsif opt == '-o'
+      output_directory = arg
+      output_base = nil
+      lock_directory = output_directory
+      lock_base = nil
+    elsif opt == '-O'
+      output_directory = nil
+      output_base = arg
+      output_base += '/' unless /\/\z/ =~ output_base
+      lock_directory = nil
+      lock_base = output_base
+    elsif opt == '-l'
+      lock_directory = arg
+      lock_base = nil
+    elsif opt == '-L'
+      lock_directory = nil
+      lock_base = arg
+      lock_base += '/' unless /\/\z/ =~ lock_base
+    end
+  }
+
   begin
-    sucker.update_module(mod, $OPT_b)
+    tmpdir = TempDir.new
+    queue.each {|mod, out, lock|
+      sucker = CVSSuck.new(tmpdir, cvsroot, planner, out, lock)
+      begin
+	sucker.update_module(mod, breadth_first)
+      ensure
+	sucker.cleanup
+      end
+    }
   ensure
-    sucker.cleanup
     tmpdir.cleanup unless $debug.include?(:leavetmp) && $!
   end
 end

@@ -1,6 +1,10 @@
 ** short term issue
 
-* try to find CVSROOT to examine LockDir
+* restart (keep queue as file).
+
+dump queue in file when leaving directory.
+
+* try to find CVSROOT to get LockDir
 
 * call checkinable? only once for each delta.
   (by caching lock_rev in checkinable?)
@@ -18,13 +22,18 @@
 * an option to disable new directory detection.
 and use local directory structure to traverse.
 
+* Don't use -q and -Q to shut up cvs.
+All output should be scanned and unrecognized message should throw exception.
+
 ** middle term issue
 
 * use autoconf.
 
 * use the option -d for cvs log.
 
-* support revision translation.
+* support revision/tag translation.
+
+-t main-trunk-tag[:N]
 
 a.b.c.d.e.... -> 1.1.999.N.a.b.c.d.e....
 
@@ -33,27 +42,21 @@ is not exist yet.
 
 N is a number to identify imported tree.
 
-* support tag translation.
-
-double suffixed `-'s
+if N is 1, suffixed hyphens of tag will be doubled.
 
 a-b-c	-> a-b-c
 a-b-c-	-> a-b-c--
 a-b-c--	-> a-b-c----
 
+if N is not 1, --N- is inserted after last non-hyphen character addition to above translation.
+
+a-b-c	-> a-b-c--N-
+a-b-c-	-> a-b-c--N---
+a-b-c--	-> a-b-c--N-----
+
+Note that valid tag is [A-Za-z][A-Za-z_-]*
+
 * setup proper tag to refer translated main trunk.
-
-* create a logo
-
-案1: cvs の魚の生け作り
-
-いけづくり【生け作り・生け造り・活け造り】
-        （1）生きたままの鯉（こい）・鯛（たい）などを頭・
-        尾・大骨はそのままに肉をそいで刺身に作り、もとの形
-        に並べた料理。いきづくり。姿づくり。
-        （2）新鮮な魚の刺身。
-
-案2: cvs の魚をくわえた猫
 
 [* handle multiple directories at once.]
 
