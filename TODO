@@ -1,5 +1,7 @@
 ** short term issue
 
+* extract planning issue from update_file.
+
 * hide log getting from update_directory.
 (update_file should get itself.  Of course it should get logs in whole directory and cache it.)
 
@@ -9,9 +11,7 @@
 
 * incremental rcsfile attribute update.
 
-* handle Attic elegantly
-
-* clear lock
+* clear lock when SIGTERM
 
 ** middle term issue
 
