@@ -17,6 +17,9 @@
 
 * clear lock when SIGTERM
 
+* an option to disable new directory detection.
+and use local directory structure to traverse.
+
 ** middle term issue
 
 * use autoconf.

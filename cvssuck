@@ -486,6 +486,10 @@ class LocalRepository
   def file(relpath, name)
     return directory(relpath).file(name)
   end
+
+  def mkdir(relpath)
+    mkdir_recursive(@topdir + relpath)
+  end
 end
 
 class LocalDirectory
@@ -965,12 +969,13 @@ class CVSSuck
     while !queue.empty?
       relpath = queue.shift
       @work.setup_workdir(remote_top + relpath)
+      subdirs = @work.getsubdirs
+      subdirs.collect! {|subdir| "#{relpath}/#{subdir}"}
+      subdirs.each {|dir| @repository.mkdir(dir)}
       if breadth_first
-	@work.getsubdirs.each {|subdir| queue << "#{relpath}/#{subdir}"}
+	subdirs.each {|dir| queue << dir}
       else
-	@work.getsubdirs.reverse_each {|subdir|
-	  queue.unshift("#{relpath}/#{subdir}")
-	}
+	subdirs.reverse_each {|dir| queue.unshift(dir)}
       end
       update_directory(relpath, since)
     end
