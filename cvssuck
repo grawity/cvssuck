@@ -370,7 +370,7 @@ class CVSWork
 	system "/bin/rm", "-rf", name
       end
     end
-    @subdir = @subdir ? @subdir.succ : "a"
+    @subdir = @subdir ? @subdir.succ + "" : "a"
     Dir.mkdir("#{@workdir}/#{@subdir}")
     Dir.mkdir("#{@workdir}/#{@subdir}/CVS")
 
