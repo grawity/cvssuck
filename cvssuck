@@ -165,9 +165,12 @@ class CVSWork
     Dir.mkdir(@workdir)
     Dir.mkdir("#{@workdir}/CVS")
     open("#{@workdir}/CVS/Root", "w") {|f| f.print(cvsroot, "\n")}
+    @cache_filename = nil
+    @cache_path = nil
   end
 
   def setup_workdir(repository)
+    discard_cache
     open("#{@workdir}/CVS/Repository", "w") {|f| f.print(repository, "\n")}
     open("#{@workdir}/CVS/Entries", "w") {|f| f.print("D\n")}
     Dir.foreach(@workdir) {|f|
@@ -234,12 +237,24 @@ class CVSWork
   end
 
   def getrevision(rev, filename)
+    discard_cache if @cache_filename != filename
     # -kb is not suitable because it prevents delta transmission.
     self.run_cvs("-Q", "update", "-ko", "-r#{rev}", filename)
-    return "#{@workdir}/#{filename}"
+    @cache_filename = filename
+    @cache_path = "#{@workdir}/#{filename}"
+    return @cache_path
+  end
+
+  def discard_cache
+    if @cache_filename
+      File.unlink(@cache_path)
+      @cache_filename = nil
+      @cache_path = nil
+    end
   end
 
   def cleanup
+    discard_cache
   end
 end
 
@@ -508,10 +523,10 @@ class CVSMirror
     raise RCSCommandFailure.new if $? != 0
   end
 
-  def checkin(rcsfile, rcsinfo, delta, tmpwork)
+  def checkin(rcsfile, rcsinfo, delta, filename)
     tmpci = @tmpdir.alloc(rcsinfo.working_file)
-    if FileTest.exist?(tmpwork)
-      system "/bin/cp", tmpwork, tmpci
+    if FileTest.exist?(filename)
+      system "/bin/cp", filename, tmpci
     else
       create_empty_file tmpci
     end
@@ -581,7 +596,6 @@ class CVSMirror
   def update_file(relpath, rcsinfo, deltas, filter)
     deltas = deltas.sort {|a, b| a.revision <=> b.revision}
 
-    tmpwork = nil
     local_rcsinfo = nil
     deltas_to_checkin = []
     lock_to_checkin = {}
@@ -611,7 +625,7 @@ class CVSMirror
       if !deltas_to_checkin.empty?
 	read_unlock(@mirrordir + relpath) {
 	  deltas_to_checkin.each {|delta|
-	    tmpwork = update_delta(relpath, rcsinfo, delta, lock_to_checkin[delta]) || tmpwork
+	    update_delta(relpath, rcsinfo, delta, lock_to_checkin[delta])
 	  }
 	}
 	if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
@@ -625,21 +639,15 @@ class CVSMirror
 	update_rcs_attributes(relpath, local_rcsfile, rcsinfo, local_rcsinfo)
       end
     }
-
-    begin
-      File.unlink(tmpwork)
-    rescue Errno::ENOENT
-    end if tmpwork
   end
 
   def update_delta(relpath, rcsinfo, delta, lock)
-    tmpwork = nil
     target = nil
     if delta.state == 'dead'
       # xxx: /dev/null is not correct.  it should point to the previous revision checkouted from local rcsfile.
       target = '/dev/null'
     else
-      target = tmpwork = @work.getrevision(delta.revision, rcsinfo.working_file)
+      target = @work.getrevision(delta.revision, rcsinfo.working_file)
     end
 
     disable_interrupt {
@@ -670,7 +678,6 @@ class CVSMirror
 	end
       }
     }
-    return tmpwork
   end
 
 end

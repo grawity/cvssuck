@@ -7,6 +7,8 @@
 
 * handle Attic elegantly
 
+* clear lock
+
 ** middle term issue
 
 * use autoconf.
@@ -38,6 +40,8 @@ a-b-c--	-> a-b-c----
         ¡Ê2¡Ë¿·Á¯¤Êµû¤Î»É¿È¡£
 
 °Æ2: cvs ¤Îµû¤ò¤¯¤ï¤¨¤¿Ç­
+
+[* handle multiple directories at once.]
 
 ** long term issue
 
