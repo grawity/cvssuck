@@ -8,6 +8,9 @@ cvssuck \- inefficient cvs repository grabber using cvs command
 .RB [ -h ]
 .RB [ -b ]
 .RB [ -s ]
+.RB [ -v ]
+.RB [ -D
+.IR debug-option ",...]"
 .I cvsroot
 .RB [ -o
 .I output-directory\f1|\f3\-O
@@ -53,6 +56,18 @@ first revision of the trunk, 1.1, branchpoints, head of branches and tagged revi
 Note that first two (first revision of the trunk and 1.1) is identical in usual case.
 
 .TP
+.B \-v
+makes CVSsuck verbosely.
+This is same as 
+.RB ` "-D command,attic,cvsout,leavetmp" '.
+
+.TP
+.BI \-D " debug-option"\\f1,...
+specifies debug options.
+Available debug options are 
+.RB ` command "', `" attic "', `" protocollog "', `" cvsout "', `" verbose "' and `" leavetmp "'."
+
+.TP
 .BI \-o " output-directory"
 specifies the directory to store grabbed repository.
 A remote RCS file 
@@ -75,6 +90,9 @@ will be stored in
 and
 .B \-O
 is exclusive.
+The last specified before
+.I module
+is effective.
 By default,
 .B CVSsuck
 behaves as that current directory is specified with
@@ -92,6 +110,10 @@ and
 .B \-L
 is exclusive.
 A lock directory should be specified after an output directory.
+The last specified before
+.I module
+after an output directory
+is effective.
 By default,
 .B CVSsuck
 assumes a lock directory is same as output directory.

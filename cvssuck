@@ -4,16 +4,20 @@
 
 # usage:
 #
-# % cvssuck [-h] [-b] [-s] cvsroot [-o output-directory|-O output-base] [-l lock-directory|-L lock-base] module ...
-# 
-# -h : print help message
-# -b : breadth first traverse mode
-# -s : skeleton mode
-
+# % cvssuck [-h] [-b] [-s] [-v] [-D debug-option,...] cvsroot [-o output-directory|-O output-base] [-l lock-directory|-L lock-base] module ...
+#
+# -h : print help message.
+# -b : breadth first traverse mode.
+# -s : skeleton mode.
+# -v : verbose mode. (same as -D command,attic,cvsout,leavetmp)
+# -D debug-option,... : specify debug options.
 # -o output-directory : module/dir/file,v -> output-directory/dir/file,v
 # -O output-base      : module/dir/file,v -> output-base/module/dir/file,v
-# -l lock-directory   : lock lock-directory/dir to access local RCS file.
-# -L lock-base        : lock lock-base/module/dir to access local RCS file.
+# -l lock-directory   : use lock-directory/dir as lock directory.
+# -L lock-base	      : use lock-base/module/dir as lock directory.
+
+# -o and -O is exclusive.  The last specified before module is effective.
+# -l and -L is exclusive.  The last specified after -o or -O before module is effective.
 
 # example:
 #
@@ -233,16 +237,16 @@ class RevisionSet
     if rev.trunk?
       b = nil
       if @head.key?(b)
-        yield @head[b] if @head[b] < rev
+	yield @head[b] if @head[b] < rev
       else
-        yield nil
+	yield nil
       end
     else
       b = rev.branch
       if @head.key?(b)
-        yield @head[b] if @head[b] < rev
+	yield @head[b] if @head[b] < rev
       else
-        yield nil if @revs.include?(rev.branch_point)
+	yield nil if @revs.include?(rev.branch_point)
       end
     end
   end
@@ -291,11 +295,11 @@ class RCSLog
 	if file_delimiter.length <= l.length && file_delimiter == l[l.length - file_delimiter.length, file_delimiter.length]
 	  l[l.length - file_delimiter.length, file_delimiter.length] = "\n"
 	end
-        header, *deltas = l.split(delta_delimiter)
+	header, *deltas = l.split(delta_delimiter)
 	header << "\n" if header !~ /\n\z/
 	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
 	raise LogFormatError.new unless /^Working file: (.*)\n/ =~ header; working_file = $1
-	raise LogFormatError.new if /\/|\A(?:\.\.|\.)\z/ =~ working_file 
+	raise LogFormatError.new if /\/|\A(?:\.\.|\.)\z/ =~ working_file
 	raise LogFormatError.new unless /^head: (.*)\n/ =~ header; head = $1
 	/^branch: (.*)\n/ =~ header; default_branch = $1
 	raise LogFormatError.new unless /^symbolic names:\n((?:\t.*\n)*)/ =~ header; symbolic_names = $1
@@ -405,7 +409,7 @@ class CVSWork
   def grepfile(filename, pat)
     open(filename, 'r') {|f|
       f.each {|l|
-        return l if pat =~ l
+	return l if pat =~ l
       }
     }
     return nil
@@ -420,7 +424,7 @@ class CVSWork
     args << "-d#{since}<" if since
     run_cvs_internal(*args) {|status, out, err|
       if status == 256 && (line = grepfile(err, / nothing known about /))
-        STDERR.print "warning: `cvs log' in #{@repository} is failed with a message `#{line.chomp}'\n"
+	STDERR.print "warning: `cvs log' in #{@repository} is failed with a message `#{line.chomp}'\n"
       else
 	raise CVSCommandFailure.new(status) if status != 0
       end
@@ -432,7 +436,7 @@ class CVSWork
     result = []
     self.run_cvs_stderr("update", "-r00", "-d", "-p", ".") {|f|
       f.each_line {|l|
-        result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
+	result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
       }
     }
     return result
@@ -528,17 +532,17 @@ class LocalDirectory
 
   # locking interfaces:
   #
-  # * read_lock {...} 
+  # * read_lock {...}
   # * write_lock {...}
 
   # for each directory, there are three states:
   #
-  # * unlocked     - read_lock   -> read locked.
-  #                - write_lock  -> write locked.
-  # * read locked  - read_lock   -> read locked.
-  #                - write_lock  -> write locked.
-  # * write locked - read_lock   -> write locked.
-  #                - write_lock  -> write locked.
+  # * unlocked	   - read_lock	 -> read locked.
+  #		   - write_lock	 -> write locked.
+  # * read locked  - read_lock	 -> read locked.
+  #		   - write_lock	 -> write locked.
+  # * write locked - read_lock	 -> write locked.
+  #		   - write_lock	 -> write locked.
 
   def unlocked?
     return @lockstate == :unlock
@@ -643,7 +647,7 @@ class LocalDirectory
     Dir.foreach(@lockdir) {|f|
       if /\A\#cvs\.rfl/ =~ f
 	next if $' == Info
-        raise LockFailure.new(@lockdir)
+	raise LockFailure.new(@lockdir)
       end
     }
   end
@@ -669,7 +673,7 @@ class LocalDirectory
 	@age += 1
       }
       begin
-        enable_interrupt
+	enable_interrupt
 	yield
       ensure
 	disable_interrupt {
@@ -705,7 +709,7 @@ class LocalDirectory
 	delete_master_lock
 	@lockstate = old_lock
 	@age += 1 if old_lock == :unlock
-        enable_interrupt
+	enable_interrupt
       end
     end
   end
@@ -913,7 +917,7 @@ class LocalFile
 	result = true
       }
       # CVSsuck assumes that rcs files grows monotonicly.  i.e. Any revision
-      # doesn't removed.  Although the assumption makes CVSsuck faster, 
+      # doesn't removed.  Although the assumption makes CVSsuck faster,
       # `cvs admin -o' or `rcs -o' can invalidate the assumption.
       # So, you shouldn't use them when CVSsuck is running.
       return result if result == false
@@ -969,7 +973,7 @@ class CVSSuck
       when DeltaInfo
 	deltas << obj
       when NilClass
-        update_file(local_directory, rcsinfo, deltas)
+	update_file(local_directory, rcsinfo, deltas)
       else
 	raise Error.new
       end
@@ -989,7 +993,7 @@ class CVSSuck
   def update_delta(local_file, rcsinfo, remote_delta, local_delta, attic)
     contents_file = nil
     if remote_delta.state == 'dead'
-      # xxx: /dev/null is not correct.  it should point to the previous revision checkouted from local rcsfile.
+      # xxx: /dev/null is not correct.	it should point to the previous revision checkouted from local rcsfile.
       contents_file = '/dev/null'
     else
       contents_file = @work.getrevision(rcsinfo.working_file, remote_delta.revision)
@@ -1007,11 +1011,11 @@ module Planner
       deltas = deltas.sort {|a, b| a.revision <=> b.revision}
       deltas.each {|delta|
 	if delta.revision.trunk?
-          attic = delta.attic?(rcsinfo)
+	  attic = delta.attic?(rcsinfo)
 	else
 	  attic = nil
 	end
-        yield delta, delta, attic
+	yield delta, delta, attic
       }
     end
   end
@@ -1030,7 +1034,7 @@ module Planner
       deltas = []
       revs.collect! {|r| deltas << r2d[r] if r2d[r]}
       @planner.plan(rcsinfo, deltas) {|delta, local_delta, attic|
-        yield delta, local_delta, attic
+	yield delta, local_delta, attic
       }
     end
 
@@ -1049,15 +1053,15 @@ module Planner
 	r1 = r2
       }
       if 0 < revs.length
-        result << revs[0]
-        result << revs[-1]
+	result << revs[0]
+	result << revs[-1]
       end
       if revs.include?(r = Revision.new("1.1"))
 	# 1.1 is important because it is a branch point of vendor branches.
-        result << r
+	result << r
       end
       rcsinfo.tags.each {|s, r|
-        if r.magic_branch?
+	if r.magic_branch?
 	  result << r.branch_point
 	elsif !r.branch?
 	  result << r
@@ -1070,20 +1074,29 @@ module Planner
   end
 end
 
+$debug_list = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp]
+
 def usage
-  STDERR.print <<'End'
+  STDERR.print <<"End"
 usage: cvssuck [options] cvsroot module
 option: -h : print help message
-        -s : grab only root, branchpoint, tagged revision and heads of branches.
-	-o output-directory : specify output directory. (default: module)
-	-b : breadth first traverse. (default: depth first)
+	-b : traverse breadth first. (default: depth first)
+	-s : grab only root, branchpoint, tagged revision and heads of branches.
+	-v : same as `-D command,attic,cvsout,leavetmp'.
+	-D debug-option,... : specify debug options.
+	-o output-directory : specify output directory.
+	-O output-base : specify output base directory.
+	-l lock-directory : specify lock directory.
+	-L lock-base : specify lock base directory.
+	-Q queue-file : specify queue file to resume.
+debug-option: #{$debug_list.collect {|d| d.id2name}.join(", ")}
 End
   exit 1
 end
 
 def main
   $debug = []
-  $debug = [:command, :attic, :cvsout, :leavetmp]
+  #$debug = [:command, :attic, :cvsout, :leavetmp]
   #$debug = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp]
 
   optionparser = GetoptLong.new(
@@ -1093,7 +1106,9 @@ def main
     [GetoptLong::REQUIRED_ARGUMENT, '-o'],
     [GetoptLong::REQUIRED_ARGUMENT, '-O'],
     [GetoptLong::REQUIRED_ARGUMENT, '-l'],
-    [GetoptLong::REQUIRED_ARGUMENT, '-L'])
+    [GetoptLong::REQUIRED_ARGUMENT, '-L'],
+    [GetoptLong::REQUIRED_ARGUMENT, '-D'],
+    [GetoptLong::NO_ARGUMENT, '-v'])
   optionparser.ordering=(GetoptLong::RETURN_IN_ORDER)
 
   cvsroot = nil
@@ -1121,6 +1136,19 @@ def main
       breadth_first = true
     elsif opt == '-s'
       planner = Planner::Skeleton.new(planner)
+    elsif opt == '-v'
+      [:command, :attic, :cvsout, :leavetmp].each {|d|
+	$debug << d
+      }
+    elsif opt == '-D'
+      arg.split(/,/).each {|s|
+	d = s.intern
+	unless $debug_list.include?(d)
+	  STDERR.print "unknown debug option: #{s}\n"
+	  exit 1
+	end
+	$debug << d
+      }
     elsif opt == '-o'
       output_directory = arg
       output_base = nil
