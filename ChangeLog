@@ -1,3 +1,7 @@
+2002-01-02  Tanaka Akira  <akr@m17n.org>
+
+	* cvssuck: fork for each directory.
+
 2001-10-09  Tanaka Akira  <akr@m17n.org>
 
 	* cvssuck: subdirectory listing was failed in local mode.
