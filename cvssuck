@@ -1,15 +1,14 @@
 #!/usr/local/bin/ruby
 
-#require 'profile'
-
-# CVSsuck - cvs repository retrieving tool via cvs client/server protocol
+## CVSsuck - cvs repository retrieving tool via cvs client/server protocol
 
 # usage:
 #
-# % cvssuck [-s] [-t] [-o output-directory] cvsroot module
+# % cvssuck [-h] [-b] [-s] [-o output-directory] cvsroot module
 # 
+# -h : print help
+# -b : breadth first traverse mode
 # -s : skeleton mode
-# -t : translation mode
 
 # example:
 #
@@ -82,7 +81,7 @@ end
 class TempDir
   def initialize(keyword="cvssuck")
     @count = 0
-    @top = "/tmp/#{keyword}-#{$$}"
+    @top = (ENV['TMPDIR'] || "/tmp") + "/#{keyword}-#{$$}"
     Dir.mkdir(@top, 0755)
     @dirs = []
     @allocated = {}
@@ -952,8 +951,8 @@ class LocalFile
 end
 
 class CVSSuck
-  def initialize(remote_cvsroot, planner, local_top, lockdir=nil)
-    @tmpdir = TempDir.new
+  def initialize(tmpdir, remote_cvsroot, planner, local_top, lockdir=nil)
+    @tmpdir = tmpdir
     @repository = LocalRepository.new(@tmpdir, local_top, lockdir)
     @work = CVSWork.new(remote_cvsroot, @tmpdir)
     @planner = planner
@@ -961,7 +960,6 @@ class CVSSuck
 
   def cleanup
     @work.cleanup
-    @tmpdir.cleanup
   end
 
   def update_module(remote_top, breadth_first, since=nil)
@@ -1002,13 +1000,11 @@ class CVSSuck
 
   def update_file(local_directory, rcsinfo, deltas)
     local_file = local_directory.file(rcsinfo.working_file)
-    #local_directory.read_lock {
     @planner.plan(rcsinfo, deltas) {|delta, local_delta, attic|
       if local_file.checkinable?(local_delta.revision)
 	update_delta(local_file, rcsinfo, delta, local_delta, attic)
       end
     }
-    #}
     local_file.update_attributes(rcsinfo)
   end
 
@@ -1111,10 +1107,10 @@ def main
   $USAGE='usage'
 
   $debug = []
-  $debug = [:command, :attic, :cvsout]
-  #$debug = [:command, :attic, :protocollog, :cvsout, :verbose]
+  $debug = [:command, :attic, :cvsout, :leavetmp]
+  #$debug = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp]
 
-  parseArgs(2, nil, 'bhs', 'o:')
+  parseArgs(2, nil, 'bhs', 'o:', 'l:')
   usage if 2 < ARGV.length
 
   usage if $OPT_h
@@ -1122,15 +1118,21 @@ def main
   cvsroot = ARGV[0]
   mod = ARGV[1]
   topdir = $OPT_o || mod
+  lockdir = $OPT_l
 
   planner = Planner::Exact.new
   if $OPT_s
     planner = Planner::Skeleton.new(planner)
   end
 
-  c = CVSSuck.new(cvsroot, planner, topdir)
-  c.update_module(mod, $OPT_b)
-  c.cleanup
+  tmpdir = TempDir.new
+  sucker = CVSSuck.new(tmpdir, cvsroot, planner, topdir, lockdir)
+  begin
+    sucker.update_module(mod, $OPT_b)
+  ensure
+    sucker.cleanup
+    tmpdir.cleanup unless $debug.include?(:leavetmp) && $!
+  end
 end
 
 main

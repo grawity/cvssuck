@@ -1,54 +1,71 @@
 .TH CVSSUCK 1 "25 September 2000"
+
 .SH NAME
-cvssuck \- inefficient cvs repository grabber via cvs client/server protocol
+cvssuck \- inefficient cvs repository grabber using cvs command
+
 .SH SYNOPSIS
 .B cvssuck
+.RB [ -h ]
+.RB [ -b ]
 .RB [ -s ]
-.RB [ -t
-.IR trunk-tag ]
 .RB [ -o 
 .IR output-directory ]
+.RB [ -l 
+.IR lock-directory ]
 .I cvsroot module
+
 .SH DESCRIPTION
   CVSsuck grabs
 .I module
 in 
 .IR cvsroot .
 
-  CVSsuck is a cvs repository mirroring tool.  Unlike other tools such
-as CVSup or rsync, it works via cvs client/server protocol.  So, it
-doesn't require a special server or shell account.  However it is
-inefficient because cvs client/server protocol is not designed for
-mirroring.  If a server provides special way to grab a repository, you
-should use it and don't use CVSsuck.
-
-  CVSsuck can translate revision numbers and tags when mirroring.  For
-example, it can copy the revision 1.1 in remote repository to the
-revision 1.1.999.1.1.1 in local repository.
-This makes development with local repository possible.
-In other words, CVSsuck can be used as
-replacement of `cvs import'.  If CVSsuck is used instead, you can refer
-logs, original tags, revisions between releases, etc.
-
-  Note that `cvs import' works well with CVSsuck until 500th vendor
-branch is created :-)
+  CVSsuck is a mirroring tool for cvs repositories.
+Unlike other tools such as CVSup or rsync,
+it uses cvs command to access the repository.
+So, it works well with remote repositories without
+a special server or shell account.
+However it is inefficient because
+cvs client/server protocol is not designed for mirroring.
+If a server provides special way to grab a repository,
+you shouldn't use CVSsuck.
 
 .SH OPTIONS
 .TP
-.BI \-o " output-directory"
-specifies output directory.
-The default is 
-.IR module .
+.B \-h
+prints help message.
+
+.TP
+.B \-b
+makes CVSsuck to traverse directories breadth first.
+The default is depth first traverse.
+
 .TP
 .B \-s
 specifies skeleton mode.
 In this mode, CVSsuck grabs only 
 first revision of the trunk, 1.1, branchpoints, head of branches and tagged revisions.
 Note that first two (first revision of the trunk and 1.1) is identical in usual case.
+
 .TP
-.BI \-t " trunk-tag"
-specifies revision/tag translation mode.
-In the mode, CVSsuck translates revisions and tags.
+.BI \-o " output-directory"
+specifies output directory.
+The default is 
+.IR module .
+
+.TP
+.BI \-l " lock-directory"
+specifies CVS style lock directory corresponding to
+.IR output-directory .
+The default is same as
+.I output-directory 
+(or
+.I moudle
+if the option
+.B \-o
+is not specified).
+
+
 .SH EXAMPLES
 .B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"
 
@@ -58,13 +75,16 @@ in the repository
 .B :pserver:anonymous@cvs.m17n.org:/cvs/cvs
 into the directory
 .B cvssuck.
+
 .SH SEE ALSO
 .BR cvs ( 1 ),
 .BR rcs ( 1 ),
 .BR cvsup ( 1 ),
 .BR rsync ( 1 )
+
 .SH AUTHORS
 Tanaka Akira <akr@m17n.org>.
+
 .SH BUGS
 It's inefficient.
 

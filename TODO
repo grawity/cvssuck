@@ -1,5 +1,7 @@
 ** short term issue
 
+* try to find CVSROOT to examine LockDir
+
 * call checkinable? only once for each delta.
   (by caching lock_rev in checkinable?)
 
@@ -8,10 +10,6 @@
 
 * hide log getting from update_directory.
 (update_file should get itself.  Of course it should get logs in whole directory and cache it.)
-
-* stylize update_xxx
-
-* LockDir (equivalent) support.
 
 * incremental rcsfile attribute update.
 
