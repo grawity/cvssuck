@@ -19,6 +19,16 @@
 require 'parsearg'
 require 'socket' # to use gethostname
 
+class Set<Hash
+  def initialize(*objs)
+    objs.each {|o| self << o}
+  end
+
+  def <<(obj)
+    self[obj] = true
+  end
+end
+
 class LogFormatError<Exception
 end
 
@@ -111,6 +121,26 @@ class Revision
     return (self <=> other) < 0
   end
 
+  def >(other)
+    return (self <=> other) > 0
+  end
+
+  def <=(other)
+    return (self <=> other) <= 0
+  end
+
+  def >=(other)
+    return (self <=> other) >= 0
+  end
+
+  def hash
+    return @arr.hash
+  end
+
+  def eql?(other)
+    return self == other
+  end
+
   def trunk?
     return @arr.length == 2
   end
@@ -141,32 +171,43 @@ class Revision
     return Revision.new(@str.sub(/\.\d+\.\d+\z/, ''))
   end
 
-  def checkinable?(local_revisions)
-    return if branch?
-    if trunk?
-      revs = []
-      local_revisions.each {|lrev| revs << lrev if lrev.trunk?}
-      revs.sort!
-      if revs.empty?
+end
+
+class RevisionSet
+  def initialize(revs=[])
+    @revs = {}
+    @head = {}
+    revs.each {|r| self << r}
+  end
+
+  def <<(rev)
+    @revs[rev] = true
+    b = rev.trunk? ? nil : rev.branch
+    @head[b] = rev if !@head.key?(b) || @head[b] < rev
+  end
+
+  def include?(rev)
+    return @revs.include?(rev)
+  end
+
+  def checkinable?(rev)
+    return if rev.branch?
+    if rev.trunk?
+      b = nil
+      if @head.key?(b)
+        yield @head[b] if @head[b] < rev
+      else
         yield nil
-      elsif revs[-1] < self
-	yield revs[-1]
       end
     else
-      br = branch
-      revs = []
-      local_revisions.each {|lrev| revs << lrev if lrev.on?(br)}
-      revs.sort!
-      if revs.empty?
-	if local_revisions.include?(branch_point)
-	  yield nil
-	end
-      elsif revs[-1] < self
-	yield revs[-1]
+      b = rev.branch
+      if @head.key?(b)
+        yield @head[b] if @head[b] < rev
+      else
+        yield nil if @revs.include?(rev.branch_point)
       end
     end
   end
-
 end
 
 class CVSWork
@@ -235,7 +276,9 @@ class CVSWork
   def getlogs(since=nil)
     args = ["-Q", "log"]
     args << "-d#{since}<" if since
+    p "getlogs begin" if $debug.include?(:hotspot)
     tmpfile = self.run_cvs_stdout_file(*args)
+    p "getlogs end" if $debug.include?(:hotspot)
     return tmpfile
   end
 
@@ -611,7 +654,8 @@ class CVSMirror
     deltas_to_checkin = []
     lock_to_checkin = {}
     read_lock(@mirrordir + relpath) {
-      local_revisions = []
+      p "planning begin #{tbeg = Time.now}" if $debug.include?(:hotspot)
+      local_revisions = RevisionSet.new
       if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
 	local_revisions = []
 	self.parse_rcsfile_log(local_rcsfile) {|obj|
@@ -623,16 +667,18 @@ class CVSMirror
 	  end
 	}
       end
-      revs = filter.filter(rcsinfo, deltas)
+      revs = Set.new(*filter.filter(rcsinfo, deltas))
+      p "planning mid #{tmid = Time.now} #{tmid - tbeg}" if $debug.include?(:hotspot)
       deltas.each {|delta|
 	if revs.include?(delta.revision)
-	  delta.revision.checkinable?(local_revisions) {|lock_rev|
+	  local_revisions.checkinable?(delta.revision) {|lock_rev|
 	    lock_to_checkin[delta] = lock_rev
 	    deltas_to_checkin << delta
 	    local_revisions << delta.revision
 	  }
 	end
       }
+      p "planning end #{tend = Time.now} #{tend - tbeg}" if $debug.include?(:hotspot)
       if !deltas_to_checkin.empty?
 	read_unlock(@mirrordir + relpath) {
 	  deltas_to_checkin.each {|delta|

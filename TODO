@@ -1,9 +1,11 @@
 ** short term issue
 
-* LockDir (equivalent) support.
+* hide log getting from update_directory.
+(update_file should get itself.  Of course it should get logs in whole directory and cache it.)
 
-* introduce class RevisionSet.
-  (refine checkinable?)
+* stylize update_xxx
+
+* LockDir (equivalent) support.
 
 * incremental rcsfile attribute update.
 
