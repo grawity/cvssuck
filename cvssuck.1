@@ -27,7 +27,7 @@ Unlike other tools such as CVSup or rsync,
 it uses cvs command to access the repository.
 So, it works well with remote repositories without
 a special server or shell account.
-However it is inefficient because
+However it is inefficient and not perfect because
 cvs client/server protocol is not designed for mirroring.
 If a server provides special way to grab a repository,
 you shouldn't use
@@ -175,3 +175,5 @@ Tanaka Akira <akr@m17n.org>.
 .SH BUGS
 It's inefficient.
 
+It's not perfect because revisions stated as `dead' cannot be retrieved.
+However it is not observable until the state is changed by `cvs admin -s'.
