@@ -443,6 +443,7 @@ class LocalRepository
     # xxx: Maybe, ancestors of topdir as well.
     @lockstate = {}
     @info = ".#{Socket.gethostname}.#{$$}"
+    @rcs_file = {}
   end
 
   def rcs_file(relpath, name, dead=false)
@@ -459,9 +460,13 @@ class LocalRepository
   end
 
   def find_rcs_file(relpath, name)
+    raise Error.new if @lockstate[relpath] == 'u'
+    k = [relpath, name]
+    return @rcs_file[k] if @rcs_file.key?(k)
     each_rcs_file(relpath, name) {|local_rcsfile|
       begin
 	File.stat(local_rcsfile)
+	@rcs_file[k] = local_rcsfile
 	return local_rcsfile
       rescue Errno::ENOENT
       end
@@ -627,6 +632,7 @@ class LocalRepository
 	  create_read_lock(relpath)
 	}
 	@lockstate[relpath] = 'r'
+	@rcs_file = {}
       }
       begin
         enable_interrupt
@@ -656,6 +662,7 @@ class LocalRepository
 	    create_read_lock(relpath)
 	  }
 	  @lockstate[relpath] = 'r'
+	  @rcs_file = {}
 	}
 	enable_interrupt
       end
@@ -677,6 +684,7 @@ class LocalRepository
 	  raise
 	end
 	@lockstate[relpath] = 'w'
+	@rcs_file = {} if old_lock == 'u'
       }
       begin
 	yield
@@ -689,15 +697,20 @@ class LocalRepository
     end
   end
 
-  def rcs_lock(rcsfile, lock_rev)
+  def rcs_lock(relpath, name, lock_rev)
+    rcsfile = find_rcs_file(relpath, name)
     command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
     p command if $debug.include?(:command)
     system *command
     raise RCSCommandFailure.new($?) if $? != 0
   end
 
-  def checkin(rcsfile, rcsinfo, delta, filename)
-    tmpci = @tmpdir.alloc(rcsinfo.working_file)
+  def checkin(relpath, name, rcsinfo, delta, filename)
+    rcsfile = find_rcs_file(relpath, name)
+    unless rcsfile
+      rcsfile = rcs_file(relpath, name, delta.attic?(rcsinfo))
+    end
+    tmpci = @tmpdir.alloc(name)
     if FileTest.exist?(filename)
       system "/bin/cp", filename, tmpci
     else
@@ -720,7 +733,28 @@ class LocalRepository
     @tmpdir.free(tmpci)
   end
 
-  def update_rcs_attributes(relpath, rcsfile, rcsinfo, local_rcsinfo)
+  def adjust_attic(relpath, name, in_attic)
+    local_rcsfile = find_rcs_file(relpath, name)
+    local_rcsfile_new = rcs_file(relpath, name, in_attic)
+    if local_rcsfile != local_rcsfile_new
+      make_prefixdir(local_rcsfile_new)
+      print "rename #{local_rcsfile} -> #{local_rcsfile_new}\n" if $debug.include?(:attic)
+      File.rename(local_rcsfile, local_rcsfile_new)
+      @rcs_file[[relpath, name]] = local_rcsfile_new
+    end
+  end
+
+  def commit(relpath, name, lock, rcsinfo, delta, contents_file)
+    rcs_lock(relpath, name, lock) if lock
+    checkin(relpath, name, rcsinfo, delta, contents_file)
+    # xxx: unlock if checkin is failed.
+    if delta.revision.trunk?
+      adjust_attic(relpath, name, delta.attic?(rcsinfo))
+    end
+  end
+
+  def update_attributes(relpath, name, rcsinfo, local_rcsinfo)
+    return unless rcsfile = find_rcs_file(relpath, name)
     args = []
     if rcsinfo.default_branch != local_rcsinfo.default_branch
       args << "-b#{rcsinfo.default_branch}"
@@ -746,17 +780,8 @@ class LocalRepository
     end
   end
 
-  def adjust_attic(relpath, name, in_attic, local_rcsfile=nil)
-    local_rcsfile = find_rcs_file(relpath, name) unless local_rcsfile
-    local_rcsfile_new = rcs_file(relpath, name, in_attic)
-    if local_rcsfile != local_rcsfile_new
-      make_prefixdir(local_rcsfile_new)
-      print "rename #{local_rcsfile} -> #{local_rcsfile_new}\n" if $debug.include?(:attic)
-      File.rename(local_rcsfile, local_rcsfile_new)
-    end
-  end
-
-  def parse_rcsfile_log(rcsfile)
+  def parse_rcsfile_log(relpath, name)
+    return unless rcsfile = find_rcs_file(relpath, name)
     tmprlog = @tmpdir.genname
     command = ["rlog", rcsfile]
     p command if $debug.include?(:command)
@@ -822,16 +847,14 @@ class CVSMirror
     @repository.read_lock(relpath) {
       p "planning begin #{tbeg = Time.now}" if $debug.include?(:hotspot)
       local_revisions = RevisionSet.new
-      if local_rcsfile = @repository.find_rcs_file(relpath, rcsinfo.working_file)
-	@repository.parse_rcsfile_log(local_rcsfile) {|obj|
-	  case obj
-	  when RCSInfo
-	    local_rcsinfo = obj
-	  when DeltaInfo
-	    local_revisions << obj.revision
-	  end
-	}
-      end
+      @repository.parse_rcsfile_log(relpath, rcsinfo.working_file) {|obj|
+	case obj
+	when RCSInfo
+	  local_rcsinfo = obj
+	when DeltaInfo
+	  local_revisions << obj.revision
+	end
+      }
       revs = Set[*@filter.filter(rcsinfo, deltas)]
       p "planning mid #{tmid = Time.now} #{tmid - tbeg}" if $debug.include?(:hotspot)
       deltas.each {|delta|
@@ -850,16 +873,12 @@ class CVSMirror
 	    update_delta(relpath, rcsinfo, delta, lock_to_checkin[delta])
 	  }
 	}
-	if local_rcsfile = @repository.find_rcs_file(relpath, rcsinfo.working_file)
-	  @repository.parse_rcsfile_log(local_rcsfile) {|obj|
-	    local_rcsinfo = obj if obj.kind_of?(RCSInfo)
-	  }
-	end
+	@repository.parse_rcsfile_log(relpath, rcsinfo.working_file) {|obj|
+	  local_rcsinfo = obj if obj.kind_of?(RCSInfo)
+	}
       end
 
-      if local_rcsfile
-	@repository.update_rcs_attributes(relpath, local_rcsfile, rcsinfo, local_rcsinfo)
-      end
+      @repository.update_attributes(relpath, rcsinfo.working_file, rcsinfo, local_rcsinfo)
     }
   end
 
@@ -873,18 +892,7 @@ class CVSMirror
     end
 
     @repository.write_lock(relpath) {
-      local_rcsfile = @repository.find_rcs_file(relpath, rcsinfo.working_file)
-      unless local_rcsfile
-	local_rcsfile = @repository.rcs_file(relpath, rcsinfo.working_file, delta.attic?(rcsinfo))
-      end
-
-      @repository.rcs_lock(local_rcsfile, lock) if lock && FileTest.exist?(local_rcsfile)
-      @repository.checkin(local_rcsfile, rcsinfo, delta, target)
-      # xxx: unlock if checkin is failed.
-
-      if delta.revision.trunk?
-	@repository.adjust_attic(relpath, rcsinfo.working_file, delta.attic?(rcsinfo), local_rcsfile)
-      end
+      @repository.commit(relpath, rcsinfo.working_file, lock, rcsinfo, delta, target)
     }
   end
 
