@@ -1048,7 +1048,9 @@ module Planner
       r2d = {}
       deltas.each {|d| r2d[d.revision] = d}
 
-      @planner.plan(rcsinfo, revs.collect! {|r| r2d[r]}) {|delta, local_delta, attic|
+      deltas = []
+      revs.collect! {|r| deltas << r2d[r] if r2d[r]}
+      @planner.plan(rcsinfo, deltas) {|delta, local_delta, attic|
         yield delta, local_delta, attic
       }
     end
