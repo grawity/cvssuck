@@ -59,7 +59,10 @@ class Tempdir
   end
 
   def genname
-    @count += 1 while @allocated.include?(name = "#{@top}/t#{@count}")
+    begin
+      @count += 1
+    end while @allocated.include?(name = "#{@top}/t#{@count}")
+
     @allocated[name] = true
     return name
   end
@@ -289,6 +292,7 @@ class CVSWork
 
   def setup_workdir(repository)
     discard_cache
+    @repository = repository
     open("#{@workdir}/CVS/Repository", "w") {|f| f.print(repository, "\n")}
     open("#{@workdir}/CVS/Entries", "w") {|f| f.print("D\n")}
     Dir.foreach(@workdir) {|f|
@@ -297,85 +301,75 @@ class CVSWork
     }
   end
 
-  def run_cvs_internal(childproc, *args)
-    #command = ["cvs", "-f", "-z3"] + args
-    command = ["cvs", "-f"] + args
+  def run_cvs_internal(*args)
+    command = ['cvs', '-f']
+    command << '-z3' unless $debug.include?(:protocollog)
+    command += args
     p command if $debug.include?(:command)
-    child = fork {
-      childproc.call if childproc
-      Dir.chdir(@workdir)
-      exec(*command)
-    }
-    result = yield if iterator?
-    Process.waitpid(child, nil)
-    raise CVSCommandFailure.new($?) if $? != 0
-    return result
+    begin
+      tmpbase = @tmpdir.alloc
+      tmpout = "#{tmpbase}.stdout"
+      tmperr = "#{tmpbase}.stderr"
+      child = fork {
+	ENV['CVS_CLIENT_LOG'] = tmpbase if $debug.include?(:protocollog)
+	STDOUT.reopen(open(tmpout, "w"))
+	STDERR.reopen(open(tmperr, "w"))
+	Dir.chdir(@workdir)
+	exec(*command)
+      }
+      Process.waitpid(child, nil)
+      yield $?, tmpout, tmperr
+    ensure
+      File.unlink(tmpout) if !$debug.include?(:cvsout) && FileTest.exist?(tmpout)
+      File.unlink(tmperr) if !$debug.include?(:cvsout) && FileTest.exist?(tmperr)
+      @tmpdir.free(tmpbase)
+    end
   end
 
   def run_cvs_stderr(*args)
     result = nil
-    r, w = IO.pipe
-    self.run_cvs_internal(Proc.new {
-	STDOUT.reopen(open("/dev/null"))
-	STDERR.reopen(w)
-	r.close
-	w.close
-      }, *args) {
-      w.close
-      result = yield(r)
-      r.close
+    run_cvs_internal(*args) {|status, out, err|
+      raise CVSCommandFailure.new(status) if status != 0
+      open(err, 'r') {|f| result = yield f}
     }
     return result
   end
 
-  def run_cvs_stdout_file(*args)
-    tmpfile = @tmpdir.genname
-    self.run_cvs_internal(Proc.new {
-	ENV['CVS_CLIENT_LOG'] = tmpfile if $debug.include?(:protocollog)
-	STDOUT.reopen(open(tmpfile, "w"))
-      }, *args)
-    return tmpfile
-  end
-
   def run_cvs(*args)
-    self.run_cvs_internal(nil, *args)
+    run_cvs_internal(*args) {|status, out, err|
+      raise CVSCommandFailure.new(status) if status != 0
+    }
   end
 
-  def getlogs(since=nil)
-    args = ["-q", "log"]
-    args << "-d#{since}<" if since
-    p "getlogs begin" if $debug.include?(:hotspot)
-    tmpfile = self.run_cvs_stdout_file(*args)
-    p "getlogs end" if $debug.include?(:hotspot)
-    return tmpfile
+  def grepfile(filename, pat)
+    open(filename, 'r') {|f|
+      f.each {|l|
+        return l if pat =~ l
+      }
+    }
+    return nil
   end
 
   def parselogs(since=nil)
     tmpfile = nil
-    begin
-      tmpfile = self.getlogs(since)
-    rescue CVSCommandFailure
-      args = ["-q", "log", "-h"]
-      tmpfile = self.run_cvs_stdout_file(*args)
-      RCSLog.parse_log(tmpfile) {|obj|
-	if obj.kind_of?(RCSInfo)
-	  rcsinfo = obj
-	  args = ["-q", "log", rcsinfo.working_file]
-	  tmpfile2 = self.run_cvs_stdout_file(*args)
-	  RCSLog.parse_log(tmpfile2) {|obj| yield obj}
-	  File.unlink tmpfile2
-	end
-      }
-      return
-    end
-
-    RCSLog.parse_log(tmpfile) {|obj| yield obj}
+    args = ["log"]
+    args << "-d#{since}<" if since
+    run_cvs_internal(*args) {|status, out, err|
+      if status == 256 && (line = grepfile(err, / nothing known about /))
+        STDERR.print "warning: `cvs log' in #{@repository} is failed with a message `#{line.chomp}'\n"
+      else
+	raise CVSCommandFailure.new(status) if status != 0
+      end
+      RCSLog.parse_log(out) {|obj| yield obj}
+    }
   end
 
   def getsubdirs
     result = []
-    self.run_cvs_stderr("-q", "update", "-r00", "-d", "-p", ".") {|f|
-      f.each_line {|l| result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1}
+    self.run_cvs_stderr("update", "-r00", "-d", "-p", ".") {|f|
+      f.each_line {|l|
+        result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
+      }
     }
     return result
   end
@@ -383,7 +377,7 @@ class CVSWork
   def getrevision(rev, filename)
     discard_cache if @cache_filename != filename
     # -kb is not suitable because it prevents delta transmission.
-    self.run_cvs("-Q", "update", "-ko", "-r#{rev}", filename)
+    self.run_cvs("update", "-ko", "-r#{rev}", filename)
     @cache_filename = filename
     @cache_path = "#{@workdir}/#{filename}"
     return @cache_path
@@ -828,7 +822,8 @@ def main
   $USAGE='usage'
 
   $debug = []
-  $debug = [:command, :attic, :protocollog]
+  $debug = [:command, :attic, :cvsout]
+  #$debug = [:command, :attic, :protocollog, :cvsout]
 
   parseArgs(2, nil, 'hs', 'o:')
   usage if 2 < ARGV.length
