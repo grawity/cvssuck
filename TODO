@@ -1,6 +1,6 @@
-** short term todo
+** short term issue
 
-** middle term todo
+** middle term issue
 
 * use autoconf.
 
@@ -10,7 +10,7 @@
 
 * support tag translation.
 
-** long term todo
+** long term issue
 
 * don't use cvs command by talking cvs client/server protocol directly.
 
@@ -19,3 +19,7 @@
   Currently, a revision which state is dead has empty contents.
   But real repository may not.
   (For example, dead revision is same as the revision just before.)
+
+* don't use rcs.
+
+  to handle empty log message properly.
