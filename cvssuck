@@ -1,0 +1,548 @@
+#!/usr/local/bin/ruby
+
+require "socket" # to use gethostname
+
+class CouldNotLock<Exception
+end
+
+class RetryLock<Exception
+end
+
+class InvalidUnlock<Exception
+end
+
+class CVSWork
+  def initialize(cvsroot)
+    @tmpdir = "/tmp/cvs-mirror-tmp-#{$$}"
+    @tmpcount = 0
+    @workdir = "#{@tmpdir}/w"
+    Dir.mkdir(@tmpdir, 0700)
+    Dir.mkdir("#{@workdir}")
+    Dir.mkdir("#{@workdir}/CVS")
+    open("#{@workdir}/CVS/Root", "w") {|f| f.print(cvsroot, "\n")}
+  end
+
+  def tmpfilename(filename=nil)
+    @tmpcount += 1
+    if filename
+      Dir.mkdir("#{@tmpdir}/t#{@tmpcount}")
+      return "#{@tmpdir}/t#{@tmpcount}/#{filename}"
+    else
+      return "#{@tmpdir}/t#{@tmpcount}"
+    end
+  end
+
+  def setup_workdir(repository)
+    open("#{@workdir}/CVS/Repository", "w") {|f| f.print(repository, "\n")}
+    open("#{@workdir}/CVS/Entries", "w") {|f| f.print("D\n")}
+    Dir.foreach(@workdir) {|f|
+      next if /\A(\.\.|\.|CVS)\z/ =~ f
+      File.unlink("#{@workdir}/#{f}")
+    }
+  end
+
+  def run_cvs_internal(childproc, *args)
+    child = fork {
+      childproc.call if childproc
+      Dir.chdir(@workdir)
+      exec("cvs", "-f", *args)
+    }
+    result = yield if iterator?
+    Process.waitpid(child, nil)
+    return result
+  end
+
+  def run_cvs_stdout(*args)
+    result = nil
+    r, w = IO.pipe
+    self.run_cvs_internal(Proc.new {
+	STDOUT.reopen(w)
+	#STDERR.reopen(open("/dev/null"))
+	r.close
+	w.close
+      }, *args) {
+      w.close
+      result = yield(r)
+      r.close
+    }
+    return result
+  end
+
+  def run_cvs_stderr(*args)
+    result = nil
+    r, w = IO.pipe
+    self.run_cvs_internal(Proc.new {
+	STDOUT.reopen(open("/dev/null"))
+	STDERR.reopen(w)
+	r.close
+	w.close
+      }, *args) {
+      w.close
+      result = yield(r)
+      r.close
+    }
+    return result
+  end
+
+  def run_cvs_stdout_file(*args)
+    tmpfile = self.tmpfilename
+    self.run_cvs_internal(Proc.new {
+	STDOUT.reopen(open(tmpfile, "w"))
+	#STDERR.reopen(open("/dev/null"))
+      }, *args)
+    return tmpfile
+  end
+
+  def run_cvs(*args)
+    self.run_cvs_internal(Proc.new {
+	#STDOUT.reopen(open("/dev/null"))
+	STDERR.reopen(open("/dev/null"))
+      }, *args)
+  end
+
+  def getlogs(since=nil)
+    args = ["-Q", "log"]
+    args << "-d#{since}<" if since
+    tmpfile = self.run_cvs_stdout_file(*args)
+    return tmpfile
+  end
+
+  def getsubdirs
+    result = []
+    self.run_cvs_stderr("-Q", "update", "-r00", "-d", "-p", ".") {|f|
+      f.each_line {|l| result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1}
+    }
+    return result
+  end
+
+  def getrevision(rev, filename)
+    # -kb is not suitable because it prevents delta transmission.
+    # -Q doesn't prevent the message `cvs server: warning: a is not (any longer) pertinent'.
+    self.run_cvs("-Q", "update", "-ko", "-r#{rev}", filename)
+    return "#{@workdir}/#{filename}"
+  end
+
+  def cleanup
+    system("/bin/rm -rf #{@tmpdir}")
+  end
+end
+
+Delta = Struct.new("Delta", :revision, :date, :author, :state, :branches, :log)
+
+class CVSMirror
+  def initialize(mirrordir, cvsroot, mod)
+    @mirrordir = mirrordir
+    @cvsroot = cvsroot
+    @module = mod
+    @work = CVSWork.new(@cvsroot)
+    @lock = {}
+  end
+
+  def cleanup
+    @work.cleanup
+  end
+
+  class LogFormatError < Exception
+  end
+
+  def parselog(logfile)
+    open(logfile) {|f|
+      file_delimiter = "\n=============================================================================\n"
+      revision_delimiter = /\n----------------------------\n/
+      while l = f.gets(file_delimiter)
+	if file_delimiter.length <= l.length && file_delimiter == l[l.length - file_delimiter.length, file_delimiter.length]
+	  l[l.length - file_delimiter.length, file_delimiter.length] = "\n"
+	end
+        header, *revisions = l.split(revision_delimiter)
+	header << "\n" if header !~ /\n\z/
+	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
+	raise LogFormatError.new unless /^Working file: (.*)\n/ =~ header; working_file = $1
+	raise LogFormatError.new unless /^head: (.*)\n/ =~ header; head = $1
+	/^branch: (.*)\n/ =~ header; default_branch = $1
+	raise LogFormatError.new unless /^symbolic names:\n((?:\t.*\n)*)/ =~ header; symbolic_names = $1
+	tags = symbolic_names.split(/\n/).collect! {|l| l.split(/[\s:]+/)[1,2]}
+	raise LogFormatError.new unless /^keyword substitution: (.*)\n/ =~ header; keyword_substitution = $1
+	raise LogFormatError.new unless /^description:\n/ =~ header; description = $'
+	yield 'begin_file', rcs_file, working_file, head, default_branch, tags, keyword_substitution, description
+	revisions.each {|r|
+	  raise LogFormatError.new unless /\Arevision ([.\d]*).*\n/ =~ r
+	  revision = $1
+	  r = $'
+	  raise LogFormatError.new unless /\Adate: (\d+\/\d+\/\d+ \d+:\d+:\d+);  author: ([a-zA-Z0-9_\-]+);  state: (\w+);.*\n/ =~ r
+	  date = $1
+	  author = $2
+	  state = $3
+	  r = $'
+	  if /\Abranches:\s*(.*);\n/ =~ r
+	    r = $'
+	    branches = $1.split(/;\s*/)
+	  else
+	    branches = []
+	  end
+	  log = r
+	  yield 'revision', revision, date, author, state, branches, log
+	}
+	yield 'end_file'
+      end
+    }
+  end
+
+  def collect_revisions(logfile)
+    revisions = []
+    self.parselog(logfile) {|typ, *rest| revisions << rest[0] if typ == 'revision'}
+    return revisions
+  end
+
+  def make_prefixdir(filename)
+    filename = filename.clone
+    if filename.sub!(/\/[^\/]*\z/, '')
+      mkdir_recursive(filename)
+    end
+  end
+
+  def mkdir_recursive(filename)
+    return if FileTest.directory?(filename)
+    begin
+      Dir.mkdir(filename)
+    rescue Errno::ENOENT
+      mkdir_recursive(filename.sub(/\/[^\/]*\z/, ''))
+      retry
+    end
+  end
+
+  def find_rcs_file(subpath, working_file)
+    local_rcsfile = @mirrordir + subpath + '/' + working_file + ',v'
+    begin
+      File.stat(local_rcsfile)
+    rescue Errno::ENOENT
+      local_rcsfile = @mirrordir + subpath + '/Attic/' + working_file + ',v'
+      begin
+	File.stat(local_rcsfile)
+      rescue Errno::ENOENT
+	local_rcsfile = nil
+      end
+    end
+    return local_rcsfile
+  end
+
+  def master_lock(dir)
+    mkdir_recursive(dir)
+    n = 0
+    begin
+      Dir.mkdir("#{dir}/#cvs.lock")
+    rescue Errno::EEXIST
+      STDERR.print "master lock failed: #{dir}/\#cvs.lock\n"
+      raise CouldNotLock.new if (n += 1) == 10
+      secs = 30 + rand(30)
+      STDERR.print "waiting #{secs} seconds... (#{n} times tried.)\n"
+      sleep secs
+      retry
+    end
+    @lock[dir] = [] if @lock[dir] == nil
+    @lock[dir] << '#cvs.lock'
+  end
+
+  def master_unlock(dir)
+    Dir.rmdir("#{dir}/#cvs.lock")
+    @lock[dir].delete('#cvs.lock') { raise InvalidUnlock.new }
+  end
+
+  def create_read_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+    f = "\#cvs.rfl#{info}"
+    @lock[dir] = [] if @lock[dir] == nil
+    @lock[dir] << f
+    create_empty_file "#{dir}/#{f}"
+  end
+
+  def delete_read_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+    f = "\#cvs.rfl#{info}"
+    @lock[dir].delete(f) { raise InvalidUnlock.new }
+    File.unlink "#{dir}/#{f}"
+  end
+
+  def read_lock(dir)
+    locked = false
+    rlocked = false
+    begin
+      disable_interrupt {
+	master_lock(dir); locked = true
+	create_read_lock_file(dir); rlocked = true
+	master_unlock(dir); locked = false
+      }
+      yield
+    ensure
+      delete_read_lock_file(dir) if rlocked
+    end
+  end
+
+  def create_write_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+    f = "\#cvs.wfl#{info}"
+    @lock[dir] = [] if @lock[dir] == nil
+    @lock[dir] << f
+    create_empty_file "#{dir}/#{f}"
+  end
+
+  def delete_write_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+    f = "\#cvs.wfl#{info}"
+    @lock[dir].delete(f) { raise InvalidUnlock.new }
+    File.unlink "#{dir}/#{f}"
+  end
+
+  def write_lock(dir)
+    n = 0
+    locked = false
+    wlocked = false
+    begin
+      master_lock(dir); locked = true
+      Dir.foreach(dir) {|f|
+	next if @lock[dir].include?(f)
+	if /\A\#cvs\.rfl/ =~ f
+	  STDERR.print "read lock found: #{dir}/#{f}\n"
+	  raise RetryLock.new
+	end
+      }
+      create_write_lock_file(dir); wlocked = true
+      yield
+    rescue RetryLock
+      master_unlock(dir); locked = false
+      raise CouldNotLock.new if (n += 1) == 10
+      secs = 30 + rand(30)
+      STDERR.print "waiting #{secs} seconds... (#{n} times tried.)\n"
+      sleep secs
+      retry
+    ensure
+      delete_write_lock_file(dir) if wlocked
+      master_unlock(dir) if locked
+    end
+  end
+
+  def disable_interrupt
+    trap('INT', 'IGNORE')
+    trap('TERM', 'IGNORE')
+    if iterator?
+      yield
+      enable_interrupt
+    end
+  end
+
+  def enable_interrupt
+    trap('INT', 'DEFAULT')
+    trap('TERM', 'DEFAULT')
+  end
+
+  def create_empty_file(filename)
+    open(filename, "w") {}
+  end
+
+  def update(since=nil)
+    tmprlog = @work.tmpfilename
+    tmpcidir = @work.tmpfilename
+    Dir.mkdir(tmpcidir)
+    queue = [""]
+    while !queue.empty?
+      subpath = queue.shift
+      mod = @module + subpath
+      #p mod
+      @work.setup_workdir(mod)
+      @work.getsubdirs.each {|subdir| queue << "#{subpath}/#{subdir}"}
+      logfile = @work.getlogs(since)
+      rcs_file = working_file = head = default_branch = tags = keyword_substitution = description = nil
+      deltas = nil
+      parselog(logfile) {|typ, *rest|
+        case typ
+	when 'begin_file'
+	  rcs_file, working_file, head, default_branch, tags, keyword_substitution, description = rest
+	  raise Error.new if /\/|\A(?:\.\.|\.)\z/ =~ working_file 
+	  #print "begin_file #{subpath}/#{working_file}\n"
+	  deltas = []
+	when 'revision'
+	  #print "revision\n"
+	  delta = Delta.new(*rest)
+	  deltas << delta
+	when 'end_file'
+	  #print "end_file\n"
+
+	  deltas_hash = {}
+	  deltas.each {|delta|
+	    deltas_hash[delta.revision.split(/\./).collect! {|n| n.to_i}] = delta
+	  }
+	  deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
+	    
+	  old_local_revisions = nil
+	  tmpwork = nil
+	  deltas.each {|delta|
+	    rev = delta.revision
+	    next if old_local_revisions && old_local_revisions.include?(rev)
+	    read_lock(@mirrordir + subpath) {
+	      local_rcsfile = find_rcs_file(subpath, working_file)
+
+	      lock_rev = nil
+	      if local_rcsfile
+		system("rlog #{local_rcsfile} > #{tmprlog}")
+		old_local_revisions = local_revisions = collect_revisions(tmprlog)
+		if /\A(\d+)\.(\d+)\z/ =~ rev 
+		  reva = [$1.to_i, $2.to_i]
+		  # it's on a maintrunk.
+		  high_enough = true
+		  local_revisions.each {|lrev|
+		    if /\A(\d+)\.(\d+)\z/ =~ lrev
+		      lreva = [$1.to_i, $2.to_i]
+		      if (reva <=> lreva) <= 0
+			high_enough = false
+		        break
+		      end
+		    end
+		  }
+		  next unless high_enough
+		  lock_rev = ''
+		else
+		  # it's on a branch.
+		  #p rev
+		  branch = rev.sub(/\.\d+\z/, '')
+		  branchpoint = branch.sub(/\.\d+\z/, '')
+		  branch_regex = /\A#{Regexp.quote(branch + '.')}(\d+)\z/
+		  branch_rev = rev.sub(/\A.*\./, '').to_i
+		  branch_exist = false
+		  branchpoint_exist = false
+		  high_enough = true
+		  local_revisions.each {|lrev|
+		    branchpoint_exist = true if lrev == branchpoint
+		    if branch_regex =~ lrev
+		      branch_exist = true
+		      if branch_rev <= $1.to_i
+			high_enough = false
+			break
+		      end
+		    end
+		  }
+		  next unless high_enough && branchpoint_exist
+		  if branch_exist
+		    lock_rev = branch
+		  else
+		    lock_rev = nil
+		  end
+		end
+	      else
+		if /\A\d+\.\d+\z/ !~ rev 
+		  # the revision is not on a maintrunk.
+		  # non-maintrunk revision needs a branchpoint to check in.
+		  next
+		end
+		if delta.state == 'dead'
+		  local_rcsfile = @mirrordir + subpath + '/Attic/' + working_file + ',v'
+		else
+		  local_rcsfile = @mirrordir + subpath + '/' + working_file + ',v'
+		end
+	      end
+
+	      tmpwork = @work.getrevision(rev, working_file)
+
+	      #print "#{tmpwork} #{rev}\n"
+
+	      disable_interrupt {
+		write_lock(@mirrordir + subpath) {
+		  if lock_rev
+		    command = ["rcs", "-q", "-l#{lock_rev}", local_rcsfile]
+		    #p command
+		    system *command
+		  end
+		  tmpci = "#{tmpcidir}/#{working_file}"
+		  if FileTest.exist?(tmpwork)
+		    system "/bin/cp", tmpwork, tmpci
+		  else
+		    create_empty_file tmpci
+		  end
+		  make_prefixdir(local_rcsfile)
+		  command = ["ci",
+		    "-q#{rev}",
+		    "-f",
+		    "-d#{delta.date}",
+		    "-m#{delta.log}",
+		    "-t-#{description}",
+		    "-s#{delta.state}",
+		    "-w#{delta.author}",
+		    local_rcsfile,
+		    tmpci]
+		  #p command
+		  system *command
+		}
+	      }
+	    }
+	  }
+
+	  read_lock(@mirrordir + subpath) {
+	    if local_rcsfile = find_rcs_file(subpath, working_file)
+	      system("rlog #{local_rcsfile} > #{tmprlog}")
+	      l_rcs_file = l_working_file = l_head = l_default_branch = l_tags = l_keyword_substitution = l_description = nil
+	      delta = nil
+	      in_attic = nil
+	      parselog(tmprlog) {|typ, *rest|
+		case typ
+		when 'begin_file'
+		  l_rcs_file, l_working_file, l_head, l_default_branch, l_tags, l_keyword_substitution, l_description = rest
+		when 'revision'
+		  delta = Delta.new(*rest) if rest[0] == head
+		when 'end_file'
+		  in_attic = delta.state == 'dead'
+		else
+		  raise Error.new
+		end
+	      }
+	      if in_attic
+		local_rcsfile_new = @mirrordir + subpath + '/Attic/' + working_file + ',v'
+	      else
+		local_rcsfile_new = @mirrordir + subpath + '/' + working_file + ',v'
+	      end
+	      if local_rcsfile != local_rcsfile_new
+		make_prefixdir(local_rcsfile_new)
+		#print "#{local_rcsfile} -> #{local_rcsfile_new}\n"
+		File.rename(local_rcsfile, local_rcsfile_new)
+		local_rcsfile = local_rcsfile_new
+	      end
+	      args = []
+	      if default_branch != l_default_branch
+		args << "-b#{default_branch}"
+	      end
+	      if keyword_substitution != l_keyword_substitution
+		args << "-k#{keyword_substitution}"
+	      end
+	      tags.reverse_each{|sym, rev|
+		if pair = l_tags.assoc(sym)
+		  if pair[1] != rev
+		    args << "-N#{sym}:#{rev}"
+		  end
+		else
+		  args << "-n#{sym}:#{rev}"
+		end
+	      }
+	      unless args.empty?
+		args << local_rcsfile
+		command = ["rcs", "-q"] + args
+		#p command
+		disable_interrupt {
+		  write_lock(@mirrordir + subpath) {
+		    system *command
+		  }
+		}
+	      end
+	    end
+	  }
+
+	  begin
+	    File.unlink(tmpwork)
+	  rescue Errno::ENOENT
+	  end if tmpwork
+	else
+	  raise Error.new
+	end
+      }
+    end
+  end
+end
+
+c = CVSMirror.new(ARGV[0], ARGV[1], ARGV[2])
+c.update
+c.cleanup
+
+# ./cvsmirror /var/tmp/y/apel :fork:/home/akr/.cvsroot tmp/apel
+# ./cvsmirror /var/tmp/y/tst :fork:/home/akr/.cvsroot tst

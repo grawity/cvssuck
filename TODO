@@ -1,0 +1,21 @@
+** short term todo
+
+** middle term todo
+
+* use autoconf.
+
+* use the option -d for cvs log.
+
+* support revision translation.
+
+* support tag translation.
+
+** long term todo
+
+* don't use cvs command by talking cvs client/server protocol directly.
+
+* handle dead state more properly. (valuable? possible?)
+
+  Currently, a revision which state is dead has empty contents.
+  But real repository may not.
+  (For example, dead revision is same as the revision just before.)

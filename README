@@ -1,0 +1,15 @@
+** cvsmirror - retrieves cvs repository via cvs client/server protocol.
+
+usage:
+
+% cvsmirror mirror-dir cvsroot module
+
+example:
+
+% cvsmirror $HOME/.cvsroot/non-jisx0208 :pserver:anonymous@cvs.m17n.org:/cvs/root non-jisx0208
+
+requirement:
+
+  ruby 1.6.0
+  rcs 5.7
+  cvs 1.11
