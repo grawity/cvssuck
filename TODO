@@ -1,5 +1,7 @@
 ** short term issue
 
+* LockDir (equivalent) support.
+
 * introduce class RevisionSet.
   (refine checkinable?)
 

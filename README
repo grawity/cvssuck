@@ -1,23 +1,29 @@
-** CVSsuck - cvs repository grabber via cvs client/server protocol **
+** CVSsuck - inefficient cvs repository grabber via cvs client/server protocol **
 
 usage:
 
-% cvssuck mirror-dir cvsroot module
+% cvssuck [-s] [-t] [-o output-directory] cvsroot module
+
+-s : skeleton mode
+-t : translation mode
 
 example:
 
-* Retrieve the repository of CVSsuck 
+(0) Setup .cvspass for the repository
 
 % cvs -d :pserver:anonymous@cvs.m17n.org:/cvs/cvs login
 (Logging in to anonymous@cvs.m17n.org)
 CVS password: 
+
+(1) Grab the repository
+
 % cvssuck $HOME/.cvsroot/cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck
 
 requirement:
 
-  ruby 1.4.6
-  rcs 5.7
-  cvs 1.10
+  ruby-1.4.6	http://www.ruby-lang.org/
+  cvs-1.10	http://www.cvshome.org/
+  rcs-5.7	ftp://ftp.cs.purdue.edu/pub/RCS/
 
 author:
   Tanaka Akira <akr@m17n.org>
