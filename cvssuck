@@ -116,6 +116,10 @@ class Revision
     return br.branch? && @arr.length == br.arr.length + 1 && @arr[0, @arr.length - 1] == br.arr
   end
 
+  def same_branch?(other)
+    return (@arr.length == other.arr.length) && (trunk? || (@arr[0, @arr.length - 1] == other.arr[0, @arr.length - 1]))
+  end
+
   def branch
     raise Error.new if branch?
     return Revision.new(@str.sub(/\.\d+\z/, ''))
@@ -486,14 +490,14 @@ class CVSMirror
     open(filename, "w") {}
   end
 
-  def update(since=nil)
+  def update(filter=Filter::All.new, since=nil)
     queue = [""]
     while !queue.empty?
       relpath = queue.shift
       mod = @module + relpath
       @work.setup_workdir(mod)
       @work.getsubdirs.each {|subdir| queue << "#{relpath}/#{subdir}"}
-      update_directory(relpath, since)
+      update_directory(relpath, filter, since)
     end
   end
 
@@ -528,7 +532,7 @@ class CVSMirror
     @tmpdir.free(tmpci)
   end
 
-  def update_directory(relpath, since)
+  def update_directory(relpath, filter, since)
     rcsinfo = nil
     deltas = nil
     parse_log(@work.getlogs(since)) {|obj|
@@ -539,7 +543,7 @@ class CVSMirror
       when DeltaInfo
 	deltas << obj
       when NilClass
-        update_file(relpath, rcsinfo, deltas)
+        update_file(relpath, rcsinfo, deltas, filter)
       else
 	raise Error.new
       end
@@ -574,7 +578,7 @@ class CVSMirror
     end
   end
 
-  def update_file(relpath, rcsinfo, deltas)
+  def update_file(relpath, rcsinfo, deltas, filter)
     deltas = deltas.sort {|a, b| a.revision <=> b.revision}
 
     tmpwork = nil
@@ -594,12 +598,15 @@ class CVSMirror
 	  end
 	}
       end
+      revs = filter.filter(rcsinfo, deltas)
       deltas.each {|delta|
-	delta.revision.checkinable?(local_revisions) {|lock_rev|
-	  lock_to_checkin[delta] = lock_rev
-	  deltas_to_checkin << delta
-	  local_revisions << delta.revision
-	}
+	if revs.include?(delta.revision)
+	  delta.revision.checkinable?(local_revisions) {|lock_rev|
+	    lock_to_checkin[delta] = lock_rev
+	    deltas_to_checkin << delta
+	    local_revisions << delta.revision
+	  }
+	end
       }
       if !deltas_to_checkin.empty?
 	read_unlock(@mirrordir + relpath) {
@@ -668,11 +675,58 @@ class CVSMirror
 
 end
 
+module Filter
+  class All
+    def filter(rcsinfo, deltas)
+      revs = deltas.clone
+      revs.collect! {|d| d.revision}
+      return revs
+    end
+  end
+
+  class Skeleton
+    def filter(rcsinfo, deltas)
+      revs = deltas.clone
+      revs.collect! {|d| d.revision}
+      revs.sort!
+
+      result = []
+      r1 = nil
+      revs.each {|r2|
+	if r1 && !r1.same_branch?(r2)
+	  result << r1
+	  result << r2.branch_point unless r2.trunk?
+	end
+	r1 = r2
+      }
+      if 0 < revs.length
+        result << revs[0]
+        result << revs[-1]
+      end
+      if revs.include?(r = Revision.new("1.1"))
+	# 1.1 is important because it is a branch point of vendor branches.
+        result << r
+      end
+      rcsinfo.tags.each {|s, r|
+        if r.magic_branch?
+	  result << r.branch_point
+	elsif !r.branch?
+	  result << r
+	end
+      }
+      result.sort!
+      result.uniq!
+      return result
+    end
+
+  end
+end
+
 def usage
   STDERR.print <<'End'
 usage: cvssuck [options] mirror-dir cvsroot module
 option: -h : print help message
-        -s : grab only branchpoint, tagged revision and heads of branches.
+        -s : grab only root, branchpoint, tagged revision and heads of branches.
 End
   exit 1
 end
@@ -683,7 +737,7 @@ def main
   $debug = []
   $debug = [:command, :attic]
 
-  parseArgs(3, nil, 'h')
+  parseArgs(3, nil, 'hs')
 
   usage if $OPT_h
 
@@ -691,8 +745,10 @@ def main
   cvsroot = ARGV[1]
   mod = ARGV[2]
 
+  filter = $OPT_s ? Filter::Skeleton.new : Filter::All.new
+
   c = CVSMirror.new(mirrordir, cvsroot, mod)
-  c.update
+  c.update(filter)
   c.cleanup
 end
 
