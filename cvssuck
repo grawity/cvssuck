@@ -51,7 +51,7 @@ class CVSWork
 
   def run_cvs_internal(childproc, *args)
     command = ["cvs", "-f"] + args
-    #p command
+    p command if $debug.include?(:command)
     child = fork {
       childproc.call if childproc
       Dir.chdir(@workdir)
@@ -206,7 +206,7 @@ class CVSMirror
   def parse_rcsfile_log(rcsfile)
     tmprlog = @work.tmpfilename
     command = "rlog #{rcsfile} > #{tmprlog}"
-    #p command
+    p command if $debug.include?(:command)
     system(command)
     parse_log(tmprlog) {|obj| yield obj}
     File.unlink(tmprlog)
@@ -428,7 +428,7 @@ class CVSMirror
 
   def rcs_lock(rcsfile, lock_rev)
     command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
-    #p command
+    p command if $debug.include?(:command)
     system *command
   end
 
@@ -452,7 +452,7 @@ class CVSMirror
       "-w#{delta.author}",
       rcsfile,
       tmpci]
-    #p command
+    p command if $debug.include?(:command)
     system *command
     Dir.rmdir(tmpcidir)
   end
@@ -561,7 +561,7 @@ class CVSMirror
 	unless args.empty?
 	  args << local_rcsfile
 	  command = ["rcs", "-q"] + args
-	  #p command
+	  p command if $debug.include?(:command)
 	  disable_interrupt {
 	    write_lock(@mirrordir + relpath) {
 	      system *command
@@ -579,6 +579,9 @@ class CVSMirror
   end
 
 end
+
+$debug = []
+#$debug = [:command]
 
 c = CVSMirror.new(ARGV[0], ARGV[1], ARGV[2])
 c.update
