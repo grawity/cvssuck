@@ -890,12 +890,18 @@ class CVSSuck
     @tmpdir.cleanup
   end
 
-  def update_module(remote_top, since=nil)
+  def update_module(remote_top, breadth_first, since=nil)
     queue = [""]
     while !queue.empty?
       relpath = queue.shift
       @work.setup_workdir(remote_top + relpath)
-      @work.getsubdirs.each {|subdir| queue << "#{relpath}/#{subdir}"}
+      if breadth_first
+	@work.getsubdirs.each {|subdir| queue << "#{relpath}/#{subdir}"}
+      else
+	@work.getsubdirs.reverse_each {|subdir|
+	  queue.unshift("#{relpath}/#{subdir}")
+	}
+      end
       update_directory(relpath, since)
     end
   end
@@ -1032,6 +1038,7 @@ usage: cvssuck [options] cvsroot module
 option: -h : print help message
         -s : grab only root, branchpoint, tagged revision and heads of branches.
 	-o output-directory : specify output directory. (default: module)
+	-b : breadth first traverse. (default: depth first)
 End
   exit 1
 end
@@ -1043,7 +1050,7 @@ def main
   $debug = [:command, :attic, :cvsout]
   #$debug = [:command, :attic, :protocollog, :cvsout, :verbose]
 
-  parseArgs(2, nil, 'hs', 'o:')
+  parseArgs(2, nil, 'bhs', 'o:')
   usage if 2 < ARGV.length
 
   usage if $OPT_h
@@ -1055,7 +1062,7 @@ def main
   filter = $OPT_s ? Filter::Skeleton.new : Filter::All.new
 
   c = CVSSuck.new(cvsroot, filter, topdir)
-  c.update_module(mod)
+  c.update_module(mod, $OPT_b)
   c.cleanup
 end
 
