@@ -38,9 +38,15 @@ class InvalidUnlock<Exception
 end
 
 class CVSCommandFailure<Exception
+  def initialize(status)
+    super("status: #{status}")
+  end
 end
 
 class RCSCommandFailure<Exception
+  def initialize(status)
+    super("status: #{status}")
+  end
 end
 
 class Tempdir
@@ -237,7 +243,7 @@ class CVSWork
     }
     result = yield if iterator?
     Process.waitpid(child, nil)
-    raise CVSCommandFailure.new if $? != 0
+    raise CVSCommandFailure.new($?) if $? != 0
     return result
   end
 
@@ -395,7 +401,7 @@ class CVSMirror
       exec(*command)
     }
     Process.waitpid(child, nil)
-    raise RCSCommandFailure.new if $? != 0
+    raise RCSCommandFailure.new($?) if $? != 0
     parse_log(tmprlog) {|obj| yield obj}
     File.unlink(tmprlog)
   end
@@ -570,7 +576,7 @@ class CVSMirror
     command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
     p command if $debug.include?(:command)
     system *command
-    raise RCSCommandFailure.new if $? != 0
+    raise RCSCommandFailure.new($?) if $? != 0
   end
 
   def checkin(rcsfile, rcsinfo, delta, filename)
@@ -593,7 +599,7 @@ class CVSMirror
       tmpci]
     p command if $debug.include?(:command)
     system *command
-    raise RCSCommandFailure.new if $? != 0
+    raise RCSCommandFailure.new($?) if $? != 0
     @tmpdir.free(tmpci)
   end
 
@@ -637,7 +643,7 @@ class CVSMirror
       disable_interrupt {
 	write_lock(@mirrordir + relpath) {
 	  system *command
-	  raise RCSCommandFailure.new if $? != 0
+	  raise RCSCommandFailure.new($?) if $? != 0
 	}
       }
     end
