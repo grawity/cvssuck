@@ -1092,7 +1092,6 @@ option: -h : print help message
 	-O output-base : specify output base directory.
 	-l lock-directory : specify lock directory.
 	-L lock-base : specify lock base directory.
-	-Q queue-file : specify queue file to resume.
 debug-option: #{$debug_list.collect {|d| d.id2name}.join(", ")}
 End
   exit 1
