@@ -1,4 +1,4 @@
-** CVSsuck - retrieves cvs repository via cvs client/server protocol.
+** CVSsuck - cvs repository grabber via cvs client/server protocol **
 
 usage:
 
@@ -6,13 +6,18 @@ usage:
 
 example:
 
-% cvssuck $HOME/.cvsroot/non-jisx0208 :pserver:anonymous@cvs.m17n.org:/cvs/root non-jisx0208
+* Retrieve the repository of CVSsuck 
+
+% cvs -d :pserver:anonymous@cvs.m17n.org:/cvs/cvs login
+(Logging in to anonymous@cvs.m17n.org)
+CVS password: 
+% cvssuck $HOME/.cvsroot/cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck
 
 requirement:
 
-  ruby 1.6.0
+  ruby 1.4.6
   rcs 5.7
-  cvs 1.11
+  cvs 1.10
 
 author:
   Tanaka Akira <akr@m17n.org>
