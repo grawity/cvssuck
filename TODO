@@ -1,5 +1,9 @@
 ** short term issue
 
+* add option -z to complession.
+
+* print error message of cvs if it's fatal.
+
 * abstract a queue as a sequence of jobs.
   kind of jobs:
     SuckModule
@@ -29,8 +33,7 @@ dump queue in file when leaving directory.
 * an option to disable new directory detection.
 and use local directory structure to traverse.
 
-* Don't use -q and -Q to shut up cvs.
-All output should be scanned and unrecognized message should throw exception.
+* All output should be scanned and unrecognized message should throw exception.
 
 * create RemoteRepository, RemoteDirectory, RemoteFile as well as LocalRepository, LocalDirectory, LocalFile.
 

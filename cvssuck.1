@@ -59,13 +59,13 @@ Note that first two (first revision of the trunk and 1.1) is identical in usual 
 .B \-v
 makes CVSsuck verbosely.
 This is same as 
-.RB ` "-D command,attic,cvsout,leavetmp" '.
+.RB ` "-D command,attic,leavetmp" '.
 
 .TP
 .BI \-D " debug-option"\\f1,...
 specifies debug options.
-Available debug options are 
-.RB ` command "', `" attic "', `" protocollog "', `" cvsout "', `" verbose "' and `" leavetmp "'."
+Available debug options are listed by
+.RB ` "cvssuck -h" '.
 
 .TP
 .BI \-o " output-directory"
@@ -160,10 +160,12 @@ into
 
 .B "% cvssuck -s :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"
 
-grabs a skeleton of the module
+grabs needy revisions (skeleton) of the module
 .B cvssuck.
 
 .SH SEE ALSO
+http://cvs.m17n.org/~akr/cvssuck/
+
 .BR cvs ( 1 ),
 .BR rcs ( 1 ),
 .BR cvsup ( 1 ),
