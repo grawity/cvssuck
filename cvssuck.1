@@ -28,26 +28,33 @@ local repository possible.  In other words, CVSsuck can be used as
 replacement of `cvs import'.  If CVSsuck is used instead, you can refer
 logs, original tags, revisions between releases, etc.
 
-  Note that `cvs import' works well with CVSsuck until 1000th vendor
+  Note that `cvs import' works well with CVSsuck until 500th vendor
 branch is created :-)
 
 .SH OPTIONS
-.TP
-.B \-s
-specifies skeleton mode.
-In this mode, CVSsuck grabs only 
-1.1, branchpoints, head of branches, tagged revision and
-oldest revision of the trunk.
-.TP
-.B \-t
-specifies revision/tag translation mode.
 .TP
 .BI \-o " output-directory"
 specifies output directory.
 The default is 
 .IR module .
-.SH EXIT STATUS
+.TP
+.B \-s
+specifies skeleton mode.
+In this mode, CVSsuck grabs only 
+first revision of the trunk, 1.1, branchpoints, head of branches and tagged revisions.
+Note that first two (first revision of the trunk and 1.1) is identical in usual case.
+.TP
+.B \-t
+specifies revision/tag translation mode.
 .SH EXAMPLES
+.B "% cvssuck :pserver:anonymous@cvs.m17n.org:/cvs/cvs cvssuck"
+
+  This grabs the module
+.B cvssuck
+in the repository
+.B :pserver:anonymous@cvs.m17n.org:/cvs/cvs
+into the directory
+.B cvssuck.
 .SH SEE ALSO
 .BR cvs ( 1 ),
 .BR rcs ( 1 ),
