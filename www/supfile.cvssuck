@@ -1,0 +1,6 @@
+*default host=cvs.m17n.org
+*default base=.
+*default release=cvs
+*default delete use-rel-suffix
+*default compress
+cvssuck
