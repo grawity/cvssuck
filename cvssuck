@@ -510,7 +510,7 @@ class LocalDirectory
     @read_lock_file = "#{@lockdir}/\#cvs.rfl#{Info}"
     @write_lock_file = "#{@lockdir}/\#cvs.wfl#{Info}"
 
-    @lockstate = 'u'
+    @lockstate = :unlock
     @age = 0
   end
 
@@ -545,19 +545,19 @@ class LocalDirectory
   #                - write_lock  -> write locked.
 
   def unlocked?
-    return @lockstate == 'u'
+    return @lockstate == :unlock
   end
 
   def locked?
-    return @lockstate != 'u'
+    return @lockstate != :unlock
   end
 
   def read_locked?
-    return @lockstate == 'r'
+    return @lockstate == :read_lock
   end
 
   def write_locked?
-    return @lockstate == 'w'
+    return @lockstate == :write_lock
   end
 
   def disable_interrupt
@@ -662,14 +662,14 @@ class LocalDirectory
   end
 
   def read_lock
-    if @lockstate != 'u'
+    if @lockstate != :unlock
       yield
     else
       try_lock {
 	master_lock {
 	  create_read_lock
 	}
-	@lockstate = 'r'
+	@lockstate = :read_lock
 	@age += 1
       }
       begin
@@ -678,7 +678,7 @@ class LocalDirectory
       ensure
 	disable_interrupt {
 	  delete_read_lock
-	  @lockstate = 'u'
+	  @lockstate = :unlock
 	  @age += 1
 	}
       end
@@ -686,12 +686,12 @@ class LocalDirectory
   end
 
   def read_unlock
-    if @lockstate != 'r'
+    if @lockstate != :read_lock
       raise InvalidUnlock.new
     else
       disable_interrupt
       delete_read_lock
-      @lockstate = 'u'
+      @lockstate = :unlock
       @age += 1
       begin
         enable_interrupt
@@ -701,7 +701,7 @@ class LocalDirectory
 	  master_lock {
 	    create_read_lock
 	  }
-	  @lockstate = 'r'
+	  @lockstate = :read_lock
 	  @age += 1
 	}
 	enable_interrupt
@@ -710,7 +710,7 @@ class LocalDirectory
   end
 
   def write_lock
-    if @lockstate == 'w'
+    if @lockstate == :write_lock
       yield
     else
       old_lock = @lockstate
@@ -723,8 +723,8 @@ class LocalDirectory
 	  delete_master_lock
 	  raise
 	end
-	@lockstate = 'w'
-	@age += 1 if old_lock == 'u'
+	@lockstate = :write_lock
+	@age += 1 if old_lock == :unlock
       }
       begin
 	yield
@@ -732,7 +732,7 @@ class LocalDirectory
 	delete_write_lock
 	delete_master_lock
 	@lockstate = old_lock
-	@age += 1 if old_lock == 'u'
+	@age += 1 if old_lock == :unlock
         enable_interrupt
       end
     end
