@@ -1,5 +1,12 @@
 ** short term issue
 
+* abstract a queue as a sequence of jobs.
+  kind of jobs:
+    SuckModule
+    SuckDirectory
+    SuckFile
+    ... (?)
+
 * restart (keep queue as file).
 
 dump queue in file when leaving directory.
@@ -24,6 +31,8 @@ and use local directory structure to traverse.
 
 * Don't use -q and -Q to shut up cvs.
 All output should be scanned and unrecognized message should throw exception.
+
+* create RemoteRepository, RemoteDirectory, RemoteFile as well as LocalRepository, LocalDirectory, LocalFile.
 
 ** middle term issue
 
