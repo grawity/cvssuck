@@ -228,7 +228,7 @@ class CVSWork
   end
 
   def run_cvs_internal(childproc, *args)
-    command = ["cvs", "-f"] + args
+    command = ["cvs", "-f", "-z3"] + args
     p command if $debug.include?(:command)
     child = fork {
       childproc.call if childproc
