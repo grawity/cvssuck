@@ -20,7 +20,7 @@ require 'parsearg'
 require 'socket' # to use gethostname
 
 class Set<Hash
-  def initialize(*objs)
+  def initialize(objs)
     objs.each {|o| self << o}
   end
 
@@ -666,7 +666,7 @@ class CVSMirror
 	  end
 	}
       end
-      revs = Set.new(*filter.filter(rcsinfo, deltas))
+      revs = Set.new(filter.filter(rcsinfo, deltas))
       p "planning mid #{tmid = Time.now} #{tmid - tbeg}" if $debug.include?(:hotspot)
       deltas.each {|delta|
 	if revs.include?(delta.revision)
