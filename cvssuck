@@ -7,6 +7,9 @@
 
 require "socket" # to use gethostname
 
+class LogFormatError<Exception
+end
+
 class CouldNotLock<Exception
 end
 
@@ -22,25 +25,59 @@ end
 class RCSCommandFailure<Exception
 end
 
-class CVSWork
-  def initialize(cvsroot)
-    @tmpdir = "/tmp/cvssuck-tmp-#{$$}"
-    @tmpcount = 0
-    @workdir = "#{@tmpdir}/w"
-    Dir.mkdir(@tmpdir, 0700)
-    Dir.mkdir("#{@workdir}")
-    Dir.mkdir("#{@workdir}/CVS")
-    open("#{@workdir}/CVS/Root", "w") {|f| f.print(cvsroot, "\n")}
+class Tempdir
+  def initialize(keyword="cvssuck")
+    @count = 0
+    @top = "/tmp/#{keyword}-#{$$}"
+    Dir.mkdir(@top, 0700)
+    @dirs = [@top]
+    @allocated = {}
   end
 
-  def tmpfilename(filename=nil)
-    @tmpcount += 1
-    if filename
-      Dir.mkdir("#{@tmpdir}/t#{@tmpcount}")
-      return "#{@tmpdir}/t#{@tmpcount}/#{filename}"
+  def genname
+    @count += 1 while @allocated.include?(name = "#{@top}/t#{@count}")
+    @allocated[name] = true
+    return name
+  end
+
+  def alloc(basename=nil)
+    if basename
+      @dirs.each {|d|
+	unless @allocated.include?(name = "#{d}/#{basename}")
+	  @allocated[name] = true
+	  return name
+	end
+      }
+      d = genname
+      Dir.mkdir(d, 0700)
+      @dirs << d
+      name = "#{d}/#{basename}"
+      @allocated[name] = true
+      return name
     else
-      return "#{@tmpdir}/t#{@tmpcount}"
+      return genname
     end
+  end
+
+  def free(name)
+    raise Error.new unless @allocated.delete(name)
+    if FileTest.exist?(name)
+      system "/bin/rm", "-rf", name
+    end
+  end
+
+  def cleanup
+    system "/bin/rm", "-rf", @top
+  end
+end
+
+class CVSWork
+  def initialize(cvsroot, tmpdir)
+    @tmpdir = tmpdir
+    @workdir = @tmpdir.genname
+    Dir.mkdir(@workdir)
+    Dir.mkdir("#{@workdir}/CVS")
+    open("#{@workdir}/CVS/Root", "w") {|f| f.print(cvsroot, "\n")}
   end
 
   def setup_workdir(repository)
@@ -83,7 +120,7 @@ class CVSWork
   end
 
   def run_cvs_stdout_file(*args)
-    tmpfile = self.tmpfilename
+    tmpfile = @tmpdir.genname
     self.run_cvs_internal(Proc.new {
 	STDOUT.reopen(open(tmpfile, "w"))
       }, *args)
@@ -116,7 +153,6 @@ class CVSWork
   end
 
   def cleanup
-    system "/bin/rm", "-rf", @tmpdir
   end
 end
 
@@ -128,18 +164,18 @@ RCSInfo = Struct.new("RCSInfo",
 
 class CVSMirror
   def initialize(mirrordir, cvsroot, mod)
+    @tmpdir = Tempdir.new
     @mirrordir = mirrordir
     @cvsroot = cvsroot
     @module = mod
-    @work = CVSWork.new(@cvsroot)
+    @work = CVSWork.new(@cvsroot, @tmpdir)
     @lock = {}
+    @hostname = Socket.gethostname
   end
 
   def cleanup
     @work.cleanup
-  end
-
-  class LogFormatError < Exception
+    @tmpdir.cleanup
   end
 
   def parse_log(logfile)
@@ -186,7 +222,7 @@ class CVSMirror
   end
 
   def parse_rcsfile_log(rcsfile)
-    tmprlog = @work.tmpfilename
+    tmprlog = @tmpdir.genname
     command = ["rlog", rcsfile]
     p command if $debug.include?(:command)
     child = fork {
@@ -253,14 +289,14 @@ class CVSMirror
     @lock[dir].delete('#cvs.lock') { raise InvalidUnlock.new }
   end
 
-  def create_read_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+  def create_read_lock_file(dir, info=".#{@hostname}.#{$$}")
     f = "\#cvs.rfl#{info}"
     @lock[dir] = [] if @lock[dir] == nil
     @lock[dir] << f
     create_empty_file "#{dir}/#{f}"
   end
 
-  def delete_read_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+  def delete_read_lock_file(dir, info=".#{@hostname}.#{$$}")
     f = "\#cvs.rfl#{info}"
     @lock[dir].delete(f) { raise InvalidUnlock.new }
     File.unlink "#{dir}/#{f}"
@@ -295,14 +331,14 @@ class CVSMirror
     end
   end
 
-  def create_write_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+  def create_write_lock_file(dir, info=".#{@hostname}.#{$$}")
     f = "\#cvs.wfl#{info}"
     @lock[dir] = [] if @lock[dir] == nil
     @lock[dir] << f
     create_empty_file "#{dir}/#{f}"
   end
 
-  def delete_write_lock_file(dir, info=".#{Socket.gethostname}.#{$$}")
+  def delete_write_lock_file(dir, info=".#{@hostname}.#{$$}")
     f = "\#cvs.wfl#{info}"
     @lock[dir].delete(f) { raise InvalidUnlock.new }
     File.unlink "#{dir}/#{f}"
@@ -436,9 +472,7 @@ class CVSMirror
   end
 
   def checkin(rcsfile, rcsinfo, delta, tmpwork)
-    tmpcidir = @work.tmpfilename
-    Dir.mkdir(tmpcidir)
-    tmpci = "#{tmpcidir}/#{rcsinfo.working_file}"
+    tmpci = @tmpdir.alloc(rcsinfo.working_file)
     if FileTest.exist?(tmpwork)
       system "/bin/cp", tmpwork, tmpci
     else
@@ -458,7 +492,7 @@ class CVSMirror
     p command if $debug.include?(:command)
     system *command
     raise RCSCommandFailure.new if $? != 0
-    Dir.rmdir(tmpcidir)
+    @tmpdir.free(tmpci)
   end
 
   def update_directory(relpath, since)
