@@ -1,3 +1,7 @@
+2001-10-09  Tanaka Akira  <akr@m17n.org>
+
+	* cvssuck: subdirectory listing was failed in local mode.
+
 2001-02-26  Tanaka Akira  <akr@m17n.org>
 
 	* split rlog output by "\n----------------------------\nrevision "
