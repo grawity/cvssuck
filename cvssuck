@@ -390,7 +390,7 @@ class CVSMirror
 	  end
 	}
 	return unless high_enough
-	lock_rev = highest.join('.')
+	lock_rev = highest.join('.') if highest
       else
 	# it's on a branch.
 	#p rev
