@@ -17,8 +17,26 @@
 #  Tanaka Akira <akr@m17n.org>
 
 require 'parsearg'
+require 'weakref'
 require 'socket' # to use gethostname
 require 'fcntl'
+
+def mkdir_prefix(filename)
+  filename = filename.clone
+  if filename.sub!(/\/[^\/]*\z/, '')
+    mkdir_recursive(filename)
+  end
+end
+
+def mkdir_recursive(filename)
+  return if FileTest.directory?(filename)
+  begin
+    Dir.mkdir(filename)
+  rescue Errno::ENOENT
+    mkdir_recursive(filename.sub(/\/[^\/]*\z/, ''))
+    retry
+  end
+end
 
 class Set<Hash
   def Set.[](*objs)
@@ -109,6 +127,7 @@ class TempDir
 end
 
 class Revision
+  attr_reader :arr
   def initialize(str)
     raise Error.new unless /\A\d+(?:\.\d+)*\z/ =~ str
     @str = str
@@ -119,7 +138,6 @@ class Revision
     return @str
   end
 
-  attr_reader :arr
 
   def <=>(other)
     result = @arr.length <=> other.arr.length
@@ -435,67 +453,68 @@ class CVSWork
 end
 
 class LocalRepository
+  attr_reader :tmpdir, :topdir, :lockdir
   def initialize(tmpdir, topdir, lockdir=nil)
     @tmpdir = tmpdir
     @topdir = topdir
     @lockdir = lockdir || topdir
     # xxx: "#{topdir}/CVSROOT/config" should be examined.
     # xxx: Maybe, ancestors of topdir as well.
-    @lockstate = {}
-    @info = ".#{Socket.gethostname}.#{$$}"
-    @rcs_file = {}
+
+    @directory = {}
   end
 
-  def rcs_file(relpath, name, dead=false)
-    if dead
-      return @topdir + relpath + '/Attic/' + name + ',v'
-    else
-      return @topdir + relpath + '/' + name + ',v'
-    end
-  end
-
-  def each_rcs_file(relpath, name)
-    yield rcs_file(relpath, name, false)
-    yield rcs_file(relpath, name, true)
-  end
-
-  def find_rcs_file(relpath, name)
-    raise Error.new if @lockstate[relpath] == 'u'
-    k = [relpath, name]
-    return @rcs_file[k] if @rcs_file.key?(k)
-    each_rcs_file(relpath, name) {|local_rcsfile|
+  def directory(relpath)
+    if @directory.key?(relpath)
       begin
-	File.stat(local_rcsfile)
-	@rcs_file[k] = local_rcsfile
-	return local_rcsfile
-      rescue Errno::ENOENT
+	return @directory[relpath].__getobj__
+      rescue RefError
       end
-    }
-    return nil
+    end
+    directory = LocalDirectory.new(self, @topdir + relpath, @lockdir + relpath)
+    @directory[relpath] = WeakRef.new(directory)
+    return directory
   end
 
-  def make_prefixdir(filename)
-    filename = filename.clone
-    if filename.sub!(/\/[^\/]*\z/, '')
-      mkdir_recursive(filename)
-    end
+  def file(relpath, name)
+    return directory(relpath).file(name)
+  end
+end
+
+class LocalDirectory
+  attr_reader :repository, :rcsdir, :age
+  def initialize(repository, rcsdir, lockdir)
+    @repository = repository
+    @file = {}
+    @info = ".#{Socket.gethostname}.#{$$}"
+
+    @rcsdir = rcsdir
+    @lockdir = lockdir
+    @master_lock_file = "#{@lockdir}/\#cvs.lock"
+    @read_lock_file = "#{@lockdir}/\#cvs.rfl#{@info}"
+    @write_lock_file = "#{@lockdir}/\#cvs.wfl#{@info}"
+
+    @lockstate = 'u'
+    @age = 0
   end
 
-  def mkdir_recursive(filename)
-    return if FileTest.directory?(filename)
-    begin
-      Dir.mkdir(filename)
-    rescue Errno::ENOENT
-      mkdir_recursive(filename.sub(/\/[^\/]*\z/, ''))
-      retry
+  def file(name)
+    if @file.key?(name)
+      begin
+	return @file[name].__getobj__
+      rescue RefError
+      end
     end
+    file = LocalFile.new(self, name)
+    @file[name] = WeakRef.new(file)
+    return file
   end
 
   # locking interfaces:
   #
-  # * read_lock(relpath) {...} 
-  # * read_unlock(relpath) {...} - can be used only in `read_lock'.
-  # * write_lock(relpath) {...}
+  # * read_lock {...} 
+  # * read_unlock {...} - can be used only in `read_lock'.
+  # * write_lock {...}
 
   # for each directory, there are three states:
   #
@@ -508,6 +527,22 @@ class LocalRepository
   # * write locked - read_lock   -> write locked.
   #                - read_unlock -> forbidden.
   #                - write_lock  -> write locked.
+
+  def unlocked?
+    return @lockstate == 'u'
+  end
+
+  def locked?
+    return @lockstate != 'u'
+  end
+
+  def read_locked?
+    return @lockstate == 'r'
+  end
+
+  def write_locked?
+    return @lockstate == 'w'
+  end
 
   def disable_interrupt
     trap('INT', 'IGNORE')
@@ -523,7 +558,7 @@ class LocalRepository
     trap('TERM', 'DEFAULT')
   end
 
-  def try_lock(relpath)
+  def try_lock
     n = 0
     begin
       disable_interrupt
@@ -532,11 +567,11 @@ class LocalRepository
       enable_interrupt
       n += 1
       if n == 10
-	STDERR.print "give up to lock #{@topdir + relpath}.\n"
+	STDERR.print "give up to lock #{@rcsdir}.\n"
 	raise
       end
       secs = 45 + rand(30)
-      STDERR.print "failed to lock #{@topdir + relpath} (#{n} times). wait #{secs} seconds...\n"
+      STDERR.print "failed to lock #{@rcsdir} (#{n} times). wait #{secs} seconds...\n"
       sleep secs
       retry
     end
@@ -544,7 +579,7 @@ class LocalRepository
 
   def create_lock_directory(filename)
     begin
-      make_prefixdir(filename)
+      mkdir_prefix(filename)
       Dir.mkdir(filename)
     rescue Exception
       raise LockFailure.new(filename)
@@ -557,7 +592,7 @@ class LocalRepository
 
   def create_lock_file(filename)
     begin
-      make_prefixdir(filename)
+      mkdir_prefix(filename)
       File.open(filename, Fcntl::O_CREAT | Fcntl::O_EXCL | Fcntl::O_WRONLY) {}
     rescue Exception
       raise LockFailure.new(filename)
@@ -568,155 +603,189 @@ class LocalRepository
     File.unlink(filename)
   end
 
-  def master_lock_file(relpath)
-    return "#{@lockdir}#{relpath}/\#cvs.lock"
+  def create_master_lock
+    create_lock_directory(@master_lock_file)
   end
 
-  def create_master_lock(relpath)
-    create_lock_directory(master_lock_file(relpath))
+  def delete_master_lock
+    delete_lock_directory(@master_lock_file)
   end
 
-  def delete_master_lock(relpath)
-    delete_lock_directory(master_lock_file(relpath))
+  def create_read_lock
+    create_lock_file(@read_lock_file)
   end
 
-  def read_lock_file(relpath)
-    return "#{@lockdir}#{relpath}/\#cvs.rfl#{@info}"
+  def delete_read_lock
+    delete_lock_file(@read_lock_file)
   end
 
-  def create_read_lock(relpath)
-    create_lock_file(read_lock_file(relpath))
+  def create_write_lock
+    create_lock_file(@write_lock_file)
   end
 
-  def delete_read_lock(relpath)
-    delete_lock_file(read_lock_file(relpath))
+  def delete_write_lock
+    delete_lock_file(@write_lock_file)
   end
 
-  def write_lock_file(relpath)
-    return "#{@lockdir}#{relpath}/\#cvs.wfl#{@info}"
-  end
-
-  def create_write_lock(relpath)
-    create_lock_file(write_lock_file(relpath))
-  end
-
-  def delete_write_lock(relpath)
-    delete_lock_file(write_lock_file(relpath))
-  end
-
-  def check_read_lock(relpath)
-    dir = "#{@lockdir}#{relpath}"
-    Dir.foreach(dir) {|f|
+  def check_read_lock
+    Dir.foreach(@lockdir) {|f|
       if /\A\#cvs\.rfl/ =~ f
 	next if $' == @info
-        raise LockFailure.new(dir)
+        raise LockFailure.new(@lockdir)
       end
     }
   end
 
-  def master_lock(relpath)
-    create_master_lock(relpath)
+  def master_lock
+    create_master_lock
     begin
       yield
     ensure
-      delete_master_lock(relpath)
+      delete_master_lock
     end
   end
 
-  def read_lock(relpath)
-    if (@lockstate[relpath] ||= 'u') != 'u'
+  def read_lock
+    if @lockstate != 'u'
       yield
     else
-      try_lock(relpath) {
-	master_lock(relpath) {
-	  create_read_lock(relpath)
+      try_lock {
+	master_lock {
+	  create_read_lock
 	}
-	@lockstate[relpath] = 'r'
-	@rcs_file = {}
+	@lockstate = 'r'
+	@age += 1
       }
       begin
         enable_interrupt
 	yield
       ensure
 	disable_interrupt {
-	  delete_read_lock(relpath)
-	  @lockstate[relpath] = 'u'
+	  delete_read_lock
+	  @lockstate = 'u'
+	  @age += 1
 	}
       end
     end
   end
 
-  def read_unlock(relpath)
-    if (@lockstate[relpath] ||= 'u') != 'r'
+  def read_unlock
+    if @lockstate != 'r'
       raise InvalidUnlock.new
     else
       disable_interrupt
-      delete_read_lock(relpath)
-      @lockstate[relpath] = 'u'
+      delete_read_lock
+      @lockstate = 'u'
+      @age += 1
       begin
         enable_interrupt
 	yield
       ensure
-	try_lock(relpath) {
-	  master_lock(relpath) {
-	    create_read_lock(relpath)
+	try_lock {
+	  master_lock {
+	    create_read_lock
 	  }
-	  @lockstate[relpath] = 'r'
-	  @rcs_file = {}
+	  @lockstate = 'r'
+	  @age += 1
 	}
 	enable_interrupt
       end
     end
   end
 
-  def write_lock(relpath)
-    if (@lockstate[relpath] ||= 'u') == 'w'
+  def write_lock
+    if @lockstate == 'w'
       yield
     else
-      old_lock = @lockstate[relpath]
-      try_lock(relpath) {
-	create_master_lock(relpath)
+      old_lock = @lockstate
+      try_lock {
+	create_master_lock
 	begin
-	  check_read_lock(relpath)
-	  create_write_lock(relpath)
+	  check_read_lock
+	  create_write_lock
 	rescue LockFailure
-	  delete_master_lock(relpath)
+	  delete_master_lock
 	  raise
 	end
-	@lockstate[relpath] = 'w'
-	@rcs_file = {} if old_lock == 'u'
+	@lockstate = 'w'
+	@age += 1 if old_lock == 'u'
       }
       begin
 	yield
       ensure
-	delete_write_lock(relpath)
-	delete_master_lock(relpath)
-	@lockstate[relpath] = old_lock
+	delete_write_lock
+	delete_master_lock
+	@lockstate = old_lock
+	@age += 1 if old_lock == 'u'
         enable_interrupt
       end
     end
   end
 
-  def rcs_lock(relpath, name, lock_rev)
-    rcsfile = find_rcs_file(relpath, name)
+end
+
+class LocalFile
+  attr_reader :name
+  def initialize(directory, name)
+    @repository = directory.repository
+    @directory = directory
+    @rcsdir = @directory.rcsdir
+    @name = name
+
+    @tmpdir = @repository.tmpdir
+
+    @cache_age = nil
+    @cache_path = nil
+  end
+
+  def rcs_file(dead=false)
+    if dead
+      return @rcsdir + '/Attic/' + @name + ',v'
+    else
+      return @rcsdir + '/' + @name + ',v'
+    end
+  end
+
+  def each_rcs_file_position
+    yield rcs_file(false)
+    yield rcs_file(true)
+  end
+
+  def find
+    raise Error.new if @directory.unlocked?
+    return @cache_path if @cache_path && @cache_age == @directory.age
+
+    each_rcs_file_position {|path|
+      begin
+	File.stat(path)
+	@cache_age = @directory.age
+	@cache_path = path
+	return path
+      rescue Errno::ENOENT
+      end
+    }
+    @cache_age = @directory.age
+    @cache_path = nil
+    return nil
+  end
+
+  def rcs_lock(lock_rev)
+    rcsfile = find
     command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
     p command if $debug.include?(:command)
     system *command
     raise RCSCommandFailure.new($?) if $? != 0
   end
 
-  def checkin(relpath, name, rcsinfo, delta, filename)
-    rcsfile = find_rcs_file(relpath, name)
-    unless rcsfile
-      rcsfile = rcs_file(relpath, name, delta.attic?(rcsinfo))
-    end
-    tmpci = @tmpdir.alloc(name)
-    if FileTest.exist?(filename)
-      system "/bin/cp", filename, tmpci
+  def checkin(rcsinfo, delta, contents_file)
+    tmpci = @tmpdir.alloc(@name)
+    if FileTest.exist?(contents_file)
+      system "/bin/cp", contents_file, tmpci
     else
       open(tmpci, "w") {}
     end
-    make_prefixdir(rcsfile)
+    rcsfile = find || rcs_file(delta.attic?(rcsinfo))
+    mkdir_prefix(rcsfile)
     command = ["ci",
       "-q#{delta.revision}",
       "-f",
@@ -731,30 +800,35 @@ class LocalRepository
     system *command
     raise RCSCommandFailure.new($?) if $? != 0
     @tmpdir.free(tmpci)
-  end
-
-  def adjust_attic(relpath, name, in_attic)
-    local_rcsfile = find_rcs_file(relpath, name)
-    local_rcsfile_new = rcs_file(relpath, name, in_attic)
-    if local_rcsfile != local_rcsfile_new
-      make_prefixdir(local_rcsfile_new)
-      print "rename #{local_rcsfile} -> #{local_rcsfile_new}\n" if $debug.include?(:attic)
-      File.rename(local_rcsfile, local_rcsfile_new)
-      @rcs_file[[relpath, name]] = local_rcsfile_new
+    unless @cache_path
+      @cache_path = rcsfile
     end
   end
 
-  def commit(relpath, name, lock, rcsinfo, delta, contents_file)
-    rcs_lock(relpath, name, lock) if lock
-    checkin(relpath, name, rcsinfo, delta, contents_file)
-    # xxx: unlock if checkin is failed.
-    if delta.revision.trunk?
-      adjust_attic(relpath, name, delta.attic?(rcsinfo))
+  def adjust_attic(in_attic)
+    rcsfile = find
+    rcsfile_new = rcs_file(in_attic)
+    if rcsfile != rcsfile_new
+      mkdir_prefix(rcsfile_new)
+      print "rename #{rcsfile} -> #{rcsfile_new}\n" if $debug.include?(:attic)
+      File.rename(rcsfile, rcsfile_new)
+      @cache_path = rcsfile_new
     end
   end
 
-  def update_attributes(relpath, name, rcsinfo, local_rcsinfo)
-    return unless rcsfile = find_rcs_file(relpath, name)
+  def commit(lock, rcsinfo, delta, contents_file)
+    @directory.write_lock {
+      rcs_lock(lock) if lock
+      checkin(rcsinfo, delta, contents_file)
+      # xxx: unlock if checkin is failed.
+      if delta.revision.trunk?
+	adjust_attic(delta.attic?(rcsinfo))
+      end
+    }
+  end
+
+  def update_attributes(rcsinfo, local_rcsinfo)
+    return unless rcsfile = find
     args = []
     if rcsinfo.default_branch != local_rcsinfo.default_branch
       args << "-b#{rcsinfo.default_branch}"
@@ -762,7 +836,7 @@ class LocalRepository
     if rcsinfo.keyword_substitution != local_rcsinfo.keyword_substitution
       args << "-k#{rcsinfo.keyword_substitution}"
     end
-    rcsinfo.tags.reverse_each{|sym, rev|
+    rcsinfo.tags.reverse_each {|sym, rev|
       if pair = local_rcsinfo.tags.assoc(sym)
 	args << "-N#{sym}:#{rev}" if pair[1] != rev
       else
@@ -773,15 +847,15 @@ class LocalRepository
       args << rcsfile
       command = ["rcs", "-q"] + args
       p command if $debug.include?(:command)
-      write_lock(relpath) {
+      @directory.write_lock {
 	system *command
 	raise RCSCommandFailure.new($?) if $? != 0
       }
     end
   end
 
-  def parse_rcsfile_log(relpath, name)
-    return unless rcsfile = find_rcs_file(relpath, name)
+  def parse_rcsfile_log
+    return unless rcsfile = find
     tmprlog = @tmpdir.genname
     command = ["rlog", rcsfile]
     p command if $debug.include?(:command)
@@ -797,7 +871,7 @@ class LocalRepository
 
 end
 
-class CVSMirror
+class CVSSuck
   def initialize(remote_cvsroot, filter, local_top, lockdir=nil)
     @tmpdir = TempDir.new
     @repository = LocalRepository.new(@tmpdir, local_top, lockdir)
@@ -821,6 +895,7 @@ class CVSMirror
   end
 
   def update_directory(relpath, since)
+    local_directory = @repository.directory(relpath)
     rcsinfo = nil
     deltas = nil
     @work.parselogs(since) {|obj|
@@ -831,23 +906,25 @@ class CVSMirror
       when DeltaInfo
 	deltas << obj
       when NilClass
-        update_file(relpath, rcsinfo, deltas)
+        update_file(local_directory, rcsinfo, deltas)
       else
 	raise Error.new
       end
     }
   end
 
-  def update_file(relpath, rcsinfo, deltas)
+  def update_file(local_directory, rcsinfo, deltas)
+    local_file = local_directory.file(rcsinfo.working_file)
+
     deltas = deltas.sort {|a, b| a.revision <=> b.revision}
 
     local_rcsinfo = nil
     deltas_to_checkin = []
     lock_to_checkin = {}
-    @repository.read_lock(relpath) {
+    local_directory.read_lock {
       p "planning begin #{tbeg = Time.now}" if $debug.include?(:hotspot)
       local_revisions = RevisionSet.new
-      @repository.parse_rcsfile_log(relpath, rcsinfo.working_file) {|obj|
+      local_file.parse_rcsfile_log {|obj|
 	case obj
 	when RCSInfo
 	  local_rcsinfo = obj
@@ -868,21 +945,21 @@ class CVSMirror
       }
       p "planning end #{tend = Time.now} #{tend - tbeg}" if $debug.include?(:hotspot)
       if !deltas_to_checkin.empty?
-	@repository.read_unlock(relpath) {
+	local_directory.read_unlock {
 	  deltas_to_checkin.each {|delta|
-	    update_delta(relpath, rcsinfo, delta, lock_to_checkin[delta])
+	    update_delta(local_file, rcsinfo, delta, lock_to_checkin[delta])
 	  }
 	}
-	@repository.parse_rcsfile_log(relpath, rcsinfo.working_file) {|obj|
+	local_file.parse_rcsfile_log {|obj|
 	  local_rcsinfo = obj if obj.kind_of?(RCSInfo)
 	}
       end
 
-      @repository.update_attributes(relpath, rcsinfo.working_file, rcsinfo, local_rcsinfo)
+      local_file.update_attributes(rcsinfo, local_rcsinfo)
     }
   end
 
-  def update_delta(relpath, rcsinfo, delta, lock)
+  def update_delta(local_file, rcsinfo, delta, lock)
     target = nil
     if delta.state == 'dead'
       # xxx: /dev/null is not correct.  it should point to the previous revision checkouted from local rcsfile.
@@ -891,9 +968,7 @@ class CVSMirror
       target = @work.getrevision(rcsinfo.working_file, delta.revision)
     end
 
-    @repository.write_lock(relpath) {
-      @repository.commit(relpath, rcsinfo.working_file, lock, rcsinfo, delta, target)
-    }
+    local_file.commit(lock, rcsinfo, delta, target)
   end
 
 end
@@ -973,7 +1048,7 @@ def main
 
   filter = $OPT_s ? Filter::Skeleton.new : Filter::All.new
 
-  c = CVSMirror.new(cvsroot, filter, topdir)
+  c = CVSSuck.new(cvsroot, filter, topdir)
   c.update_module(mod)
   c.cleanup
 end
