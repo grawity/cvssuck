@@ -737,7 +737,7 @@ class CVSMirror
       write_lock(@mirrordir + relpath) {
 	local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
 	unless local_rcsfile
-	  if delta.state == 'dead' || /\/Attic\/[^\/]+\z/ =~ rcsinfo.rcs_file
+	  if delta.state == 'dead' || (delta.revision == rcsinfo.head && /\/Attic\/[^\/]+\z/ =~ rcsinfo.rcs_file)
 	    local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
 	  else
 	    local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
@@ -748,7 +748,7 @@ class CVSMirror
 	checkin(local_rcsfile, rcsinfo, delta, target)
 
 	if delta.revision.trunk?
-	  if delta.state == 'dead' || /\/Attic\/[^\/]+\z/ =~ rcsinfo.rcs_file
+	  if delta.state == 'dead' || (delta.revision == rcsinfo.head && /\/Attic\/[^\/]+\z/ =~ rcsinfo.rcs_file)
 	    local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
 	  else
 	    local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
