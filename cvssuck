@@ -475,6 +475,33 @@ class CVSMirror
     }
   end
 
+  def update_rcs_attributes(relpath, rcsfile, rcsinfo, local_rcsinfo)
+    args = []
+    if rcsinfo.default_branch != local_rcsinfo.default_branch
+      args << "-b#{rcsinfo.default_branch}"
+    end
+    if rcsinfo.keyword_substitution != local_rcsinfo.keyword_substitution
+      args << "-k#{rcsinfo.keyword_substitution}"
+    end
+    rcsinfo.tags.reverse_each{|sym, rev|
+      if pair = local_rcsinfo.tags.assoc(sym)
+	args << "-N#{sym}:#{rev}" if pair[1] != rev
+      else
+	args << "-n#{sym}:#{rev}"
+      end
+    }
+    unless args.empty?
+      args << rcsfile
+      command = ["rcs", "-q"] + args
+      p command if $debug.include?(:command)
+      disable_interrupt {
+	write_lock(@mirrordir + relpath) {
+	  system *command
+	}
+      }
+    end
+  end
+
   def update_file(relpath, rcsinfo, deltas)
     deltas_hash = {}
     deltas.each {|delta|
@@ -529,6 +556,8 @@ class CVSMirror
 	  end
 	}
 
+	update_rcs_attributes(relpath, local_rcsfile, rcsinfo, local_rcsinfo)
+
 	if in_attic
 	  local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
 	else
@@ -539,34 +568,6 @@ class CVSMirror
 	  #print "#{local_rcsfile} -> #{local_rcsfile_new}\n"
 	  File.rename(local_rcsfile, local_rcsfile_new)
 	  local_rcsfile = local_rcsfile_new
-	end
-
-	#update_rcs_attributes(local_rcsfile, rcsinfo, local_rcsinfo)
-	args = []
-	if rcsinfo.default_branch != local_rcsinfo.default_branch
-	  args << "-b#{rcsinfo.default_branch}"
-	end
-	if rcsinfo.keyword_substitution != local_rcsinfo.keyword_substitution
-	  args << "-k#{rcsinfo.keyword_substitution}"
-	end
-	rcsinfo.tags.reverse_each{|sym, rev|
-	  if pair = local_rcsinfo.tags.assoc(sym)
-	    if pair[1] != rev
-	      args << "-N#{sym}:#{rev}"
-	    end
-	  else
-	    args << "-n#{sym}:#{rev}"
-	  end
-	}
-	unless args.empty?
-	  args << local_rcsfile
-	  command = ["rcs", "-q"] + args
-	  p command if $debug.include?(:command)
-	  disable_interrupt {
-	    write_lock(@mirrordir + relpath) {
-	      system *command
-	    }
-	  }
 	end
 
       end
