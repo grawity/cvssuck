@@ -29,7 +29,7 @@ class Tempdir
   def initialize(keyword="cvssuck")
     @count = 0
     @top = "/tmp/#{keyword}-#{$$}"
-    Dir.mkdir(@top, 0700)
+    Dir.mkdir(@top, 0755)
     @dirs = [@top]
     @allocated = {}
   end
@@ -49,7 +49,7 @@ class Tempdir
 	end
       }
       d = genname
-      Dir.mkdir(d, 0700)
+      Dir.mkdir(d, 0755)
       @dirs << d
       name = "#{d}/#{basename}"
       @allocated[name] = true
@@ -69,6 +69,88 @@ class Tempdir
   def cleanup
     system "/bin/rm", "-rf", @top
   end
+end
+
+class Revision
+  def initialize(str)
+    raise Error.new unless /\A\d+(?:\.\d+)*\z/ =~ str
+    @str = str
+    @arr = str.split(/\./); @arr.collect! {|n| n.to_i}
+  end
+
+  def to_s
+    return @str
+  end
+
+  attr_reader :arr
+
+  def <=>(other)
+    result = @arr.length <=> other.arr.length
+    result = @arr <=> other.arr if result == 0
+    return result
+  end
+
+  def ==(other)
+    return false unless other.kind_of?(Revision)
+    return (self <=> other) == 0
+  end
+
+  def <(other)
+    return (self <=> other) < 0
+  end
+
+  def trunk?
+    return @arr.length == 2
+  end
+
+  def branch?
+    return (@arr.length & 1) == 1
+  end
+
+  def magic_branch?
+    return (@arr.length & 1) == 0 && 4 <= @arr.length && @arr[-2] == 0
+  end
+
+  def on?(br)
+    return br.branch? && @arr.length == br.arr.length + 1 && @arr[0, @arr.length - 1] == br.arr
+  end
+
+  def branch
+    raise Error.new if branch?
+    return Revision.new(@str.sub(/\.\d+\z/, ''))
+  end
+
+  def branch_point
+    raise Error.new if branch?
+    return Revision.new(@str.sub(/\.\d+\.\d+\z/, ''))
+  end
+
+  def checkinable?(local_revisions)
+    return if branch?
+    if trunk?
+      revs = []
+      local_revisions.each {|lrev| revs << lrev if lrev.trunk?}
+      revs.sort!
+      if revs.empty?
+        yield nil
+      elsif revs[-1] < self
+	yield revs[-1]
+      end
+    else
+      br = branch
+      revs = []
+      local_revisions.each {|lrev| revs << lrev if lrev.on?(br)}
+      revs.sort!
+      if revs.empty?
+	if local_revisions.include?(branch_point)
+	  yield nil
+	end
+      elsif revs[-1] < self
+	yield revs[-1]
+      end
+    end
+  end
+
 end
 
 class CVSWork
@@ -197,7 +279,14 @@ class CVSMirror
 	tags = symbolic_names.split(/\n/).collect! {|l| l.split(/[\s:]+/)[1,2]}
 	raise LogFormatError.new unless /^keyword substitution: (.*)\n/ =~ header; keyword_substitution = $1
 	raise LogFormatError.new unless /^description:\n/ =~ header; description = $'
-	yield RCSInfo.new(rcs_file, working_file, head, default_branch, tags, keyword_substitution, description)
+	yield RCSInfo.new(
+	  rcs_file,
+	  working_file,
+	  Revision.new(head),
+	  default_branch ? Revision.new(default_branch) : nil,
+	  tags.collect! {|sym, rev| [sym, Revision.new(rev)]},
+	  keyword_substitution,
+	  description)
 	deltas.each {|r|
 	  raise LogFormatError.new unless /\Arevision ([.\d]*).*\n/ =~ r
 	  revision = $1
@@ -214,7 +303,13 @@ class CVSMirror
 	    branches = []
 	  end
 	  log = r
-	  yield DeltaInfo.new(revision, date, author, state, branches, log)
+	  yield DeltaInfo.new(
+	    Revision.new(revision),
+	    date,
+	    author,
+	    state,
+	    branches.collect! {|b| Revision.new(b)},
+	    log)
 	}
 	yield nil
       end
@@ -401,69 +496,6 @@ class CVSMirror
     end
   end
 
-  def trunk?(rev)
-    return /\A(\d+)\.(\d+)\z/ =~ rev
-  end
-
-  def checkinable?(local_revisions, rev)
-    lock_rev = nil
-    if local_revisions
-      if /\A(\d+)\.(\d+)\z/ =~ rev
-	reva = [$1.to_i, $2.to_i]
-	# it's on a maintrunk.
-	high_enough = true
-	highest = nil
-	local_revisions.each {|lrev|
-	  if /\A(\d+)\.(\d+)\z/ =~ lrev
-	    lreva = [$1.to_i, $2.to_i]
-	    if (reva <=> lreva) <= 0
-	      high_enough = false
-	      break
-	    end
-	    if highest == nil || (highest <=> lreva) < 0
-	      highest = lreva
-	    end
-	  end
-	}
-	return unless high_enough
-	lock_rev = highest.join('.') if highest
-      else
-	# it's on a branch.
-	#p rev
-	branch = rev.sub(/\.\d+\z/, '')
-	branchpoint = branch.sub(/\.\d+\z/, '')
-	branch_regex = /\A#{Regexp.quote(branch + '.')}(\d+)\z/
-	branch_rev = rev.sub(/\A.*\./, '').to_i
-	branch_exist = false
-	branchpoint_exist = false
-	high_enough = true
-	local_revisions.each {|lrev|
-	  branchpoint_exist = true if lrev == branchpoint
-	  if branch_regex =~ lrev
-	    branch_exist = true
-	    if branch_rev <= $1.to_i
-	      high_enough = false
-	      break
-	    end
-	  end
-	}
-	return unless high_enough && branchpoint_exist
-	if branch_exist
-	  lock_rev = branch
-	else
-	  lock_rev = nil
-	end
-      end
-    else
-      if /\A\d+\.\d+\z/ !~ rev 
-	# the revision is not on a maintrunk.
-	# non-maintrunk revision needs a branchpoint to check in.
-	return
-      end
-    end
-    yield lock_rev
-  end
-
   def rcs_lock(rcsfile, lock_rev)
     command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
     p command if $debug.include?(:command)
@@ -542,11 +574,7 @@ class CVSMirror
   end
 
   def update_file(relpath, rcsinfo, deltas)
-    deltas_hash = {}
-    deltas.each {|delta|
-      deltas_hash[delta.revision.split(/\./).collect! {|n| n.to_i}] = delta
-    }
-    deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
+    deltas = deltas.sort {|a, b| a.revision <=> b.revision}
 
     tmpwork = nil
     local_rcsinfo = nil
@@ -566,7 +594,7 @@ class CVSMirror
 	}
       end
       deltas.each {|delta|
-	checkinable?(local_revisions, delta.revision) {|lock_rev|
+	delta.revision.checkinable?(local_revisions) {|lock_rev|
 	  lock_to_checkin[delta] = lock_rev
 	  deltas_to_checkin << delta
 	  local_revisions << delta.revision
@@ -620,7 +648,7 @@ class CVSMirror
 	rcs_lock(local_rcsfile, lock) if lock && FileTest.exist?(local_rcsfile)
 	checkin(local_rcsfile, rcsinfo, delta, target)
 
-	if trunk?(delta.revision)
+	if delta.revision.trunk?
 	  if delta.state == 'dead'
 	    local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
 	  else
@@ -628,7 +656,7 @@ class CVSMirror
 	  end
 	  if local_rcsfile != local_rcsfile_new
 	    make_prefixdir(local_rcsfile_new)
-	    print "rename: #{local_rcsfile} -> #{local_rcsfile_new}\n" if $debug.include?(:attic)
+	    print "rename #{local_rcsfile} -> #{local_rcsfile_new}\n" if $debug.include?(:attic)
 	    File.rename(local_rcsfile, local_rcsfile_new)
 	  end
 	end
