@@ -54,7 +54,7 @@ class Tempdir
     @count = 0
     @top = "/tmp/#{keyword}-#{$$}"
     Dir.mkdir(@top, 0755)
-    @dirs = [@top]
+    @dirs = []
     @allocated = {}
   end
 
@@ -331,7 +331,7 @@ class CVSWork
   def run_cvs_stdout_file(*args)
     tmpfile = @tmpdir.genname
     self.run_cvs_internal(Proc.new {
-	ENV['CVS_CLIENT_LOG'] = tmpfile
+	ENV['CVS_CLIENT_LOG'] = tmpfile if $debug.include?(:protocollog)
 	STDOUT.reopen(open(tmpfile, "w"))
       }, *args)
     return tmpfile
@@ -828,7 +828,7 @@ def main
   $USAGE='usage'
 
   $debug = []
-  $debug = [:command, :attic]
+  $debug = [:command, :attic, :protocollog]
 
   parseArgs(2, nil, 'hs', 'o:')
   usage if 2 < ARGV.length
