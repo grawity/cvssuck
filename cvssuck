@@ -9,7 +9,7 @@
 # -h : print help message.
 # -b : breadth first traverse mode.
 # -s : skeleton mode.
-# -v : verbose mode. (same as -D command,attic,cvsout,leavetmp)
+# -v : verbose mode. (same as -D command,attic,leavetmp)
 # -D debug-option,... : specify debug options.
 # -o output-directory : module/dir/file,v -> output-directory/dir/file,v
 # -O output-base      : module/dir/file,v -> output-base/module/dir/file,v
@@ -80,7 +80,8 @@ class InvalidUnlock<Exception
 end
 
 class CVSCommandFailure<Exception
-  def initialize(status)
+  def initialize(status, errfile=nil)
+    open(errfile) {|f| print f.read} if errfile
     super("status: #{status}")
   end
 end
@@ -393,16 +394,16 @@ class CVSWork
       child = fork {
 	ENV['CVS_CLIENT_LOG'] = tmpbase if $debug.include?(:protocollog)
 	#env.each {|k, v| ENV[k] = v}
-	STDOUT.reopen(open(tmpout, "w"))
-	STDERR.reopen(open(tmperr, "w"))
+	open(tmpout, "w") {|f| STDOUT.reopen(f)}
+	open(tmperr, "w") {|f| STDERR.reopen(f)}
 	Dir.chdir(@workdir)
 	exec(*command)
       }
       Process.waitpid(child, nil)
       yield $?, tmpout, tmperr
     ensure
-      File.unlink(tmpout) if (!$debug.include?(:cvsout) && FileTest.exist?(tmpout)) || FileTest.zero?(tmpout)
-      File.unlink(tmperr) if (!$debug.include?(:cvsout) && FileTest.exist?(tmperr)) || FileTest.zero?(tmperr)
+      File.unlink(tmpout) if (!$debug.include?(:leavetmp) && FileTest.exist?(tmpout)) || FileTest.zero?(tmpout)
+      File.unlink(tmperr) if (!$debug.include?(:leavetmp) && FileTest.exist?(tmperr)) || FileTest.zero?(tmperr)
       @tmpdir.free(tmpbase)
     end
   end
@@ -410,7 +411,7 @@ class CVSWork
   def run_cvs_stderr(*args)
     result = nil
     run_cvs_internal(args, [['CVSCONNECT_CONNECTION', 'getsubdir']]) {|status, out, err|
-      raise CVSCommandFailure.new(status) if status != 0
+      raise CVSCommandFailure.new(status, err) if status != 0
       open(err, 'r') {|f| result = yield f}
     }
     return result
@@ -418,7 +419,7 @@ class CVSWork
 
   def run_cvs(*args)
     run_cvs_internal(args) {|status, out, err|
-      raise CVSCommandFailure.new(status) if status != 0
+      raise CVSCommandFailure.new(status, err) if status != 0
     }
   end
 
@@ -441,7 +442,7 @@ class CVSWork
       if status == 256 && (line = grepfile(err, / nothing known about /))
 	STDERR.print "warning: `cvs log' in #{@repository} is failed with a message `#{line.chomp}'\n"
       else
-	raise CVSCommandFailure.new(status) if status != 0
+	raise CVSCommandFailure.new(status, err) if status != 0
       end
       RCSLog.parse_log(out) {|obj| yield obj}
     }
@@ -891,7 +892,7 @@ class LocalFile
 	command = ["rlog", rcsfile]
 	p command if $debug.include?(:command)
 	child = fork {
-	  STDOUT.reopen(open(tmp, "w"))
+	  open(tmp, "w") {|f| STDOUT.reopen(f)}
 	  exec(*command)
 	}
 	Process.waitpid(child, nil)
@@ -1091,7 +1092,7 @@ module Planner
   end
 end
 
-$debug_list = [:command, :attic, :protocollog, :cvsout, :leavetmp, :mkdir, :mkdir_exist]
+$debug_list = [:command, :attic, :protocollog, :leavetmp, :mkdir, :mkdir_exist]
 
 def usage
   STDERR.print <<"End"
@@ -1099,7 +1100,7 @@ usage: cvssuck [options] cvsroot module
 option: -h : print help message
 	-b : traverse breadth first. (default: depth first)
 	-s : grab only root, branchpoint, tagged revision and heads of branches.
-	-v : same as `-D command,attic,cvsout,leavetmp'.
+	-v : same as `-D command,attic,leavetmp'.
 	-D debug-option,... : specify debug options.
 	-o output-directory : specify output directory.
 	-O output-base : specify output base directory.
@@ -1117,12 +1118,12 @@ def main
     [GetoptLong::NO_ARGUMENT, '-h'],
     [GetoptLong::NO_ARGUMENT, '-b'],
     [GetoptLong::NO_ARGUMENT, '-s'],
+    [GetoptLong::NO_ARGUMENT, '-v'],
+    [GetoptLong::REQUIRED_ARGUMENT, '-D'],
     [GetoptLong::REQUIRED_ARGUMENT, '-o'],
     [GetoptLong::REQUIRED_ARGUMENT, '-O'],
     [GetoptLong::REQUIRED_ARGUMENT, '-l'],
-    [GetoptLong::REQUIRED_ARGUMENT, '-L'],
-    [GetoptLong::REQUIRED_ARGUMENT, '-D'],
-    [GetoptLong::NO_ARGUMENT, '-v'])
+    [GetoptLong::REQUIRED_ARGUMENT, '-L'])
   optionparser.ordering=(GetoptLong::RETURN_IN_ORDER)
 
   cvsroot = nil
@@ -1151,7 +1152,7 @@ def main
     elsif opt == '-s'
       planner = Planner::Skeleton.new(planner)
     elsif opt == '-v'
-      [:command, :attic, :cvsout, :leavetmp].each {|d|
+      [:command, :attic, :leavetmp].each {|d|
 	$debug << d
       }
     elsif opt == '-D'
