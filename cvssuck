@@ -132,10 +132,14 @@ class TempDir
   def genname
     begin
       @count += 1
-    end while @allocated.include?(name = "#{@top}/t#{@count}")
+    end while @allocated.include?(name = "#{@top}/t#{$$}-#{@count}")
 
     @allocated[name] = true
     return name
+  end
+
+  def flush_dirs
+    @dirs = []
   end
 
   def alloc(basename=nil)
@@ -1002,7 +1006,11 @@ class CVSSuck
       else
 	subdirs.reverse_each {|dir| queue.unshift(dir)}
       end
-      update_directory(relpath, since)
+      Process.wait fork {
+	@tmpdir.flush_dirs
+	update_directory(relpath, since)
+        exit! 0
+      }
     end
   end
 
