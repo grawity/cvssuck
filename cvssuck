@@ -50,10 +50,12 @@ class CVSWork
   end
 
   def run_cvs_internal(childproc, *args)
+    command = ["cvs", "-f"] + args
+    #p command
     child = fork {
       childproc.call if childproc
       Dir.chdir(@workdir)
-      exec("cvs", "-f", *args)
+      exec(*command)
     }
     result = yield if iterator?
     Process.waitpid(child, nil)
@@ -203,7 +205,9 @@ class CVSMirror
 
   def parse_rcsfile_log(rcsfile)
     tmprlog = @work.tmpfilename
-    system("rlog #{rcsfile} > #{tmprlog}")
+    command = "rlog #{rcsfile} > #{tmprlog}"
+    #p command
+    system(command)
     parse_log(tmprlog) {|obj| yield obj}
     File.unlink(tmprlog)
   end
@@ -366,6 +370,62 @@ class CVSMirror
     end
   end
 
+  def checkinable?(local_rcsfile, rev)
+    lock_rev = nil
+    if local_rcsfile
+      @old_local_revisions = local_revisions = collect_revisions(local_rcsfile)
+      if /\A(\d+)\.(\d+)\z/ =~ rev
+	reva = [$1.to_i, $2.to_i]
+	# it's on a maintrunk.
+	high_enough = true
+	local_revisions.each {|lrev|
+	  if /\A(\d+)\.(\d+)\z/ =~ lrev
+	    lreva = [$1.to_i, $2.to_i]
+	    if (reva <=> lreva) <= 0
+	      high_enough = false
+	      break
+	    end
+	  end
+	}
+	return unless high_enough
+	lock_rev = ''
+      else
+	# it's on a branch.
+	#p rev
+	branch = rev.sub(/\.\d+\z/, '')
+	branchpoint = branch.sub(/\.\d+\z/, '')
+	branch_regex = /\A#{Regexp.quote(branch + '.')}(\d+)\z/
+	branch_rev = rev.sub(/\A.*\./, '').to_i
+	branch_exist = false
+	branchpoint_exist = false
+	high_enough = true
+	local_revisions.each {|lrev|
+	  branchpoint_exist = true if lrev == branchpoint
+	  if branch_regex =~ lrev
+	    branch_exist = true
+	    if branch_rev <= $1.to_i
+	      high_enough = false
+	      break
+	    end
+	  end
+	}
+	return unless high_enough && branchpoint_exist
+	if branch_exist
+	  lock_rev = branch
+	else
+	  lock_rev = nil
+	end
+      end
+    else
+      if /\A\d+\.\d+\z/ !~ rev 
+	# the revision is not on a maintrunk.
+	# non-maintrunk revision needs a branchpoint to check in.
+	return
+      end
+    end
+    yield lock_rev
+  end
+
   def update_directory(relpath, since)
     logfile = @work.getlogs(since)
     rcsinfo = nil
@@ -384,105 +444,55 @@ class CVSMirror
 	}
 	deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
 	  
-	old_local_revisions = nil
+	@old_local_revisions = nil
 	tmpwork = nil
 	deltas.each {|delta|
 	  rev = delta.revision
-	  next if old_local_revisions && old_local_revisions.include?(rev)
+	  next if @old_local_revisions && @old_local_revisions.include?(rev)
 	  read_lock(@mirrordir + relpath) {
 	    local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-
-	    lock_rev = nil
-	    if local_rcsfile
-	      old_local_revisions = local_revisions = collect_revisions(local_rcsfile)
-	      if /\A(\d+)\.(\d+)\z/ =~ rev
-		reva = [$1.to_i, $2.to_i]
-		# it's on a maintrunk.
-		high_enough = true
-		local_revisions.each {|lrev|
-		  if /\A(\d+)\.(\d+)\z/ =~ lrev
-		    lreva = [$1.to_i, $2.to_i]
-		    if (reva <=> lreva) <= 0
-		      high_enough = false
-		      break
-		    end
-		  end
-		}
-		next unless high_enough
-		lock_rev = ''
-	      else
-		# it's on a branch.
-		#p rev
-		branch = rev.sub(/\.\d+\z/, '')
-		branchpoint = branch.sub(/\.\d+\z/, '')
-		branch_regex = /\A#{Regexp.quote(branch + '.')}(\d+)\z/
-		branch_rev = rev.sub(/\A.*\./, '').to_i
-		branch_exist = false
-		branchpoint_exist = false
-		high_enough = true
-		local_revisions.each {|lrev|
-		  branchpoint_exist = true if lrev == branchpoint
-		  if branch_regex =~ lrev
-		    branch_exist = true
-		    if branch_rev <= $1.to_i
-		      high_enough = false
-		      break
-		    end
-		  end
-		}
-		next unless high_enough && branchpoint_exist
-		if branch_exist
-		  lock_rev = branch
+	    checkinable?(local_rcsfile, rev) {|lock_rev|
+	      unless local_rcsfile
+		if delta.state == 'dead'
+		  local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
 		else
-		  lock_rev = nil
+		  local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
 		end
 	      end
-	    else
-	      if /\A\d+\.\d+\z/ !~ rev 
-		# the revision is not on a maintrunk.
-		# non-maintrunk revision needs a branchpoint to check in.
-		next
-	      end
-	      if delta.state == 'dead'
-		local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
-	      else
-		local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
-	      end
-	    end
+	      tmpwork = @work.getrevision(rev, rcsinfo.working_file)
 
-	    tmpwork = @work.getrevision(rev, rcsinfo.working_file)
+	      #print "#{tmpwork} #{rev}\n"
 
-	    #print "#{tmpwork} #{rev}\n"
-
-	    disable_interrupt {
-	      write_lock(@mirrordir + relpath) {
-		if lock_rev
-		  command = ["rcs", "-q", "-l#{lock_rev}", local_rcsfile]
+	      disable_interrupt {
+		write_lock(@mirrordir + relpath) {
+		  if lock_rev
+		    command = ["rcs", "-q", "-l#{lock_rev}", local_rcsfile]
+		    #p command
+		    system *command
+		  end
+		  tmpcidir = @work.tmpfilename
+		  Dir.mkdir(tmpcidir)
+		  tmpci = "#{tmpcidir}/#{rcsinfo.working_file}"
+		  if FileTest.exist?(tmpwork)
+		    system "/bin/cp", tmpwork, tmpci
+		  else
+		    create_empty_file tmpci
+		  end
+		  make_prefixdir(local_rcsfile)
+		  command = ["ci",
+		    "-q#{rev}",
+		    "-f",
+		    "-d#{delta.date}",
+		    "-m" + (/\A\s*\z/ =~ delta.log ? '*** empty log message ***' : delta.log),
+		    "-t-#{rcsinfo.description}",
+		    "-s#{delta.state}",
+		    "-w#{delta.author}",
+		    local_rcsfile,
+		    tmpci]
 		  #p command
 		  system *command
-		end
-		tmpcidir = @work.tmpfilename
-		Dir.mkdir(tmpcidir)
-		tmpci = "#{tmpcidir}/#{rcsinfo.working_file}"
-		if FileTest.exist?(tmpwork)
-		  system "/bin/cp", tmpwork, tmpci
-		else
-		  create_empty_file tmpci
-		end
-		make_prefixdir(local_rcsfile)
-		command = ["ci",
-		  "-q#{rev}",
-		  "-f",
-		  "-d#{delta.date}",
-		  "-m" + (/\A\s*\z/ =~ delta.log ? '*** empty log message ***' : delta.log),
-		  "-t-#{rcsinfo.description}",
-		  "-s#{delta.state}",
-		  "-w#{delta.author}",
-		  local_rcsfile,
-		  tmpci]
-		#p command
-		system *command
-		Dir.rmdir(tmpcidir)
+		  Dir.rmdir(tmpcidir)
+		}
 	      }
 	    }
 	  }
