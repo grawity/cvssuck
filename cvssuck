@@ -342,7 +342,7 @@ class CVSWork
   end
 
   def getlogs(since=nil)
-    args = ["-Q", "log"]
+    args = ["-q", "log"]
     args << "-d#{since}<" if since
     p "getlogs begin" if $debug.include?(:hotspot)
     tmpfile = self.run_cvs_stdout_file(*args)
@@ -355,12 +355,12 @@ class CVSWork
     begin
       tmpfile = self.getlogs(since)
     rescue CVSCommandFailure
-      args = ["-Q", "log", "-h"]
+      args = ["-q", "log", "-h"]
       tmpfile = self.run_cvs_stdout_file(*args)
       RCSLog.parse_log(tmpfile) {|obj|
 	if obj.kind_of?(RCSInfo)
 	  rcsinfo = obj
-	  args = ["-Q", "log", rcsinfo.working_file]
+	  args = ["-q", "log", rcsinfo.working_file]
 	  tmpfile2 = self.run_cvs_stdout_file(*args)
 	  RCSLog.parse_log(tmpfile2) {|obj| yield obj}
 	  File.unlink tmpfile2
@@ -374,7 +374,7 @@ class CVSWork
 
   def getsubdirs
     result = []
-    self.run_cvs_stderr("-Q", "update", "-r00", "-d", "-p", ".") {|f|
+    self.run_cvs_stderr("-q", "update", "-r00", "-d", "-p", ".") {|f|
       f.each_line {|l| result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1}
     }
     return result
@@ -383,7 +383,7 @@ class CVSWork
   def getrevision(rev, filename)
     discard_cache if @cache_filename != filename
     # -kb is not suitable because it prevents delta transmission.
-    self.run_cvs("-Q", "update", "-ko", "-r#{rev}", filename)
+    self.run_cvs("-q", "update", "-ko", "-r#{rev}", filename)
     @cache_filename = filename
     @cache_path = "#{@workdir}/#{filename}"
     return @cache_path
