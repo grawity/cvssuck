@@ -426,6 +426,37 @@ class CVSMirror
     yield lock_rev
   end
 
+  def rcs_lock(rcsfile, lock_rev)
+    command = ["rcs", "-q", "-l#{lock_rev}", rcsfile]
+    #p command
+    system *command
+  end
+
+  def checkin(rcsfile, rcsinfo, delta, tmpwork)
+    tmpcidir = @work.tmpfilename
+    Dir.mkdir(tmpcidir)
+    tmpci = "#{tmpcidir}/#{rcsinfo.working_file}"
+    if FileTest.exist?(tmpwork)
+      system "/bin/cp", tmpwork, tmpci
+    else
+      create_empty_file tmpci
+    end
+    make_prefixdir(rcsfile)
+    command = ["ci",
+      "-q#{delta.revision}",
+      "-f",
+      "-d#{delta.date}",
+      "-m" + (/\A\s*\z/ =~ delta.log ? '*** empty log message ***' : delta.log),
+      "-t-#{rcsinfo.description}",
+      "-s#{delta.state}",
+      "-w#{delta.author}",
+      rcsfile,
+      tmpci]
+    #p command
+    system *command
+    Dir.rmdir(tmpcidir)
+  end
+
   def update_directory(relpath, since)
     logfile = @work.getlogs(since)
     rcsinfo = nil
@@ -465,33 +496,8 @@ class CVSMirror
 
 	      disable_interrupt {
 		write_lock(@mirrordir + relpath) {
-		  if lock_rev
-		    command = ["rcs", "-q", "-l#{lock_rev}", local_rcsfile]
-		    #p command
-		    system *command
-		  end
-		  tmpcidir = @work.tmpfilename
-		  Dir.mkdir(tmpcidir)
-		  tmpci = "#{tmpcidir}/#{rcsinfo.working_file}"
-		  if FileTest.exist?(tmpwork)
-		    system "/bin/cp", tmpwork, tmpci
-		  else
-		    create_empty_file tmpci
-		  end
-		  make_prefixdir(local_rcsfile)
-		  command = ["ci",
-		    "-q#{rev}",
-		    "-f",
-		    "-d#{delta.date}",
-		    "-m" + (/\A\s*\z/ =~ delta.log ? '*** empty log message ***' : delta.log),
-		    "-t-#{rcsinfo.description}",
-		    "-s#{delta.state}",
-		    "-w#{delta.author}",
-		    local_rcsfile,
-		    tmpci]
-		  #p command
-		  system *command
-		  Dir.rmdir(tmpcidir)
+		  rcs_lock(local_rcsfile, lock_rev) if lock_rev
+		  checkin(local_rcsfile, rcsinfo, delta, tmpwork)
 		}
 	      }
 	    }
@@ -515,6 +521,7 @@ class CVSMirror
 		raise Error.new
 	      end
 	    }
+
 	    if in_attic
 	      local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
 	    else
@@ -526,6 +533,8 @@ class CVSMirror
 	      File.rename(local_rcsfile, local_rcsfile_new)
 	      local_rcsfile = local_rcsfile_new
 	    end
+
+	    #update_rcs_attributes(local_rcsfile, rcsinfo, local_rcsinfo)
 	    args = []
 	    if rcsinfo.default_branch != local_rcsinfo.default_branch
 	      args << "-b#{rcsinfo.default_branch}"
@@ -552,6 +561,7 @@ class CVSMirror
 		}
 	      }
 	    end
+
 	  end
 	}
 
