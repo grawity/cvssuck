@@ -37,6 +37,7 @@
 # -h : print help message.
 # -b : breadth first traverse mode.
 # -s : skeleton mode.
+# -1 : add dead 1.1 if it is not available.
 # -v : verbose mode. (same as -D command,attic,leavetmp)
 # -D debug-option,... : specify debug options.
 # -o output-directory : module/dir/file,v -> output-directory/dir/file,v
@@ -1058,8 +1059,28 @@ class CVSSuck
 end
 
 module Planner
+  def initialize
+    @introduce_1_1 = false
+  end
+  attr_accessor :introduce_1_1
+
+  def prepare_deltas(deltas)
+    if @introduce_1_1
+      rev11 = Revision.new('1.1')
+      unless deltas.find {|d| d.revision == rev11}
+	deltas += [DeltaInfo.new(
+	  rev11, '1970/01/01 00:00:00', 'cvssuck', 'dead', [],
+	  'introduced by CVSsuck because 1.1 is not exist.')]
+      end
+    end
+    return deltas
+  end
+
   class Exact
+    include Planner
+
     def plan(rcsinfo, deltas)
+      deltas = prepare_deltas(deltas)
       rcsinfo.attic?
       deltas = deltas.sort {|a, b| a.revision <=> b.revision}
       deltas.each {|delta|
@@ -1074,11 +1095,15 @@ module Planner
   end
 
   class Skeleton
+    include Planner
+
     def initialize(planner)
+      super
       @planner = planner
     end
 
     def plan(rcsinfo, deltas)
+      deltas = prepare_deltas(deltas)
       revs = filter(rcsinfo, deltas)
 
       r2d = {}
@@ -1135,6 +1160,7 @@ usage: cvssuck [options] cvsroot module
 option: -h : print help message
 	-b : traverse breadth first. (default: depth first)
 	-s : grab only root, branchpoint, tagged revision and heads of branches.
+	-1 : introduce dead 1.1 if 1.1 is not available.
 	-v : same as `-D command,attic,leavetmp'.
 	-D debug-option,... : specify debug options.
 	-o output-directory : specify output directory.
@@ -1153,6 +1179,7 @@ def main
     [GetoptLong::NO_ARGUMENT, '-h'],
     [GetoptLong::NO_ARGUMENT, '-b'],
     [GetoptLong::NO_ARGUMENT, '-s'],
+    [GetoptLong::NO_ARGUMENT, '-1'],
     [GetoptLong::NO_ARGUMENT, '-v'],
     [GetoptLong::REQUIRED_ARGUMENT, '-D'],
     [GetoptLong::REQUIRED_ARGUMENT, '-o'],
@@ -1164,6 +1191,7 @@ def main
   cvsroot = nil
   breadth_first = nil
   planner = Planner::Exact.new
+  introduce_1_1 = false
   output_base = ''
   output_directory = nil
   lock_base = ''
@@ -1186,6 +1214,8 @@ def main
       breadth_first = true
     elsif opt == '-s'
       planner = Planner::Skeleton.new(planner)
+    elsif opt == '-1'
+      introduce_1_1 = true
     elsif opt == '-v'
       [:command, :attic, :leavetmp].each {|d|
 	$debug << d
@@ -1219,6 +1249,8 @@ def main
       lock_base += '/' unless /\/\z/ =~ lock_base
     end
   }
+
+  planner.introduce_1_1 = introduce_1_1
 
   begin
     tmpdir = TempDir.new
