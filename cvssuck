@@ -212,6 +212,70 @@ class RevisionSet
   end
 end
 
+DeltaInfo = Struct.new("DeltaInfo",
+  :revision, :date, :author, :state, :branches, :log)
+
+RCSInfo = Struct.new("RCSInfo",
+  :rcs_file, :working_file, :head, :default_branch, :tags, :keyword_substitution, :description)
+
+class RCSLog
+  def RCSLog.parse_log(logfile)
+    open(logfile) {|f|
+      file_delimiter = "\n=============================================================================\n"
+      delta_delimiter = /\n----------------------------\n/
+      while l = f.gets(file_delimiter)
+	if file_delimiter.length <= l.length && file_delimiter == l[l.length - file_delimiter.length, file_delimiter.length]
+	  l[l.length - file_delimiter.length, file_delimiter.length] = "\n"
+	end
+        header, *deltas = l.split(delta_delimiter)
+	header << "\n" if header !~ /\n\z/
+	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
+	raise LogFormatError.new unless /^Working file: (.*)\n/ =~ header; working_file = $1
+	raise LogFormatError.new if /\/|\A(?:\.\.|\.)\z/ =~ working_file 
+	raise LogFormatError.new unless /^head: (.*)\n/ =~ header; head = $1
+	/^branch: (.*)\n/ =~ header; default_branch = $1
+	raise LogFormatError.new unless /^symbolic names:\n((?:\t.*\n)*)/ =~ header; symbolic_names = $1
+	tags = symbolic_names.split(/\n/).collect! {|l| l.split(/[\s:]+/)[1,2]}
+	raise LogFormatError.new unless /^keyword substitution: (.*)\n/ =~ header; keyword_substitution = $1
+	raise LogFormatError.new unless /^description:\n/ =~ header; description = $'
+	yield RCSInfo.new(
+	  rcs_file,
+	  working_file,
+	  Revision.new(head),
+	  default_branch ? Revision.new(default_branch) : nil,
+	  tags.collect! {|sym, rev| [sym, Revision.new(rev)]},
+	  keyword_substitution,
+	  description)
+	deltas.each {|r|
+	  raise LogFormatError.new unless /\Arevision ([.\d]*).*\n/ =~ r
+	  revision = $1
+	  r = $'
+	  raise LogFormatError.new unless /\Adate: (\d+\/\d+\/\d+ \d+:\d+:\d+);  author: ([a-zA-Z0-9_\-]+);  state: (\w+);.*\n/ =~ r
+	  date = $1
+	  author = $2
+	  state = $3
+	  r = $'
+	  if /\Abranches:\s*(.*);\n/ =~ r
+	    r = $'
+	    branches = $1.split(/;\s*/)
+	  else
+	    branches = []
+	  end
+	  log = r
+	  yield DeltaInfo.new(
+	    Revision.new(revision),
+	    date,
+	    author,
+	    state,
+	    branches.collect! {|b| Revision.new(b)},
+	    log)
+	}
+	yield nil
+      end
+    }
+  end
+end
+
 class CVSWork
   def initialize(cvsroot, tmpdir)
     @tmpdir = tmpdir
@@ -314,12 +378,6 @@ class CVSWork
   end
 end
 
-DeltaInfo = Struct.new("DeltaInfo",
-  :revision, :date, :author, :state, :branches, :log)
-
-RCSInfo = Struct.new("RCSInfo",
-  :rcs_file, :working_file, :head, :default_branch, :tags, :keyword_substitution, :description)
-
 class CVSMirror
   def initialize(mirrordir, cvsroot, mod)
     @tmpdir = Tempdir.new
@@ -336,62 +394,6 @@ class CVSMirror
     @tmpdir.cleanup
   end
 
-  def parse_log(logfile)
-    open(logfile) {|f|
-      file_delimiter = "\n=============================================================================\n"
-      delta_delimiter = /\n----------------------------\n/
-      while l = f.gets(file_delimiter)
-	if file_delimiter.length <= l.length && file_delimiter == l[l.length - file_delimiter.length, file_delimiter.length]
-	  l[l.length - file_delimiter.length, file_delimiter.length] = "\n"
-	end
-        header, *deltas = l.split(delta_delimiter)
-	header << "\n" if header !~ /\n\z/
-	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
-	raise LogFormatError.new unless /^Working file: (.*)\n/ =~ header; working_file = $1
-	raise LogFormatError.new if /\/|\A(?:\.\.|\.)\z/ =~ working_file 
-	raise LogFormatError.new unless /^head: (.*)\n/ =~ header; head = $1
-	/^branch: (.*)\n/ =~ header; default_branch = $1
-	raise LogFormatError.new unless /^symbolic names:\n((?:\t.*\n)*)/ =~ header; symbolic_names = $1
-	tags = symbolic_names.split(/\n/).collect! {|l| l.split(/[\s:]+/)[1,2]}
-	raise LogFormatError.new unless /^keyword substitution: (.*)\n/ =~ header; keyword_substitution = $1
-	raise LogFormatError.new unless /^description:\n/ =~ header; description = $'
-	yield RCSInfo.new(
-	  rcs_file,
-	  working_file,
-	  Revision.new(head),
-	  default_branch ? Revision.new(default_branch) : nil,
-	  tags.collect! {|sym, rev| [sym, Revision.new(rev)]},
-	  keyword_substitution,
-	  description)
-	deltas.each {|r|
-	  raise LogFormatError.new unless /\Arevision ([.\d]*).*\n/ =~ r
-	  revision = $1
-	  r = $'
-	  raise LogFormatError.new unless /\Adate: (\d+\/\d+\/\d+ \d+:\d+:\d+);  author: ([a-zA-Z0-9_\-]+);  state: (\w+);.*\n/ =~ r
-	  date = $1
-	  author = $2
-	  state = $3
-	  r = $'
-	  if /\Abranches:\s*(.*);\n/ =~ r
-	    r = $'
-	    branches = $1.split(/;\s*/)
-	  else
-	    branches = []
-	  end
-	  log = r
-	  yield DeltaInfo.new(
-	    Revision.new(revision),
-	    date,
-	    author,
-	    state,
-	    branches.collect! {|b| Revision.new(b)},
-	    log)
-	}
-	yield nil
-      end
-    }
-  end
-
   def parse_rcsfile_log(rcsfile)
     tmprlog = @tmpdir.genname
     command = ["rlog", rcsfile]
@@ -402,7 +404,7 @@ class CVSMirror
     }
     Process.waitpid(child, nil)
     raise RCSCommandFailure.new($?) if $? != 0
-    parse_log(tmprlog) {|obj| yield obj}
+    RCSLog.parse_log(tmprlog) {|obj| yield obj}
     File.unlink(tmprlog)
   end
 
@@ -606,7 +608,7 @@ class CVSMirror
   def update_directory(relpath, filter, since)
     rcsinfo = nil
     deltas = nil
-    parse_log(@work.getlogs(since)) {|obj|
+    RCSLog.parse_log(@work.getlogs(since)) {|obj|
       case obj
       when RCSInfo
 	rcsinfo = obj
