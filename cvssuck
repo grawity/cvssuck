@@ -458,10 +458,9 @@ class CVSMirror
   end
 
   def update_directory(relpath, since)
-    logfile = @work.getlogs(since)
     rcsinfo = nil
     deltas = nil
-    parse_log(logfile) {|obj|
+    parse_log(@work.getlogs(since)) {|obj|
       case obj
       when RCSInfo
 	rcsinfo = obj
@@ -469,111 +468,116 @@ class CVSMirror
       when DeltaInfo
 	deltas << obj
       when NilClass
-	deltas_hash = {}
-	deltas.each {|delta|
-	  deltas_hash[delta.revision.split(/\./).collect! {|n| n.to_i}] = delta
-	}
-	deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
-	  
-	@old_local_revisions = nil
-	tmpwork = nil
-	deltas.each {|delta|
-	  rev = delta.revision
-	  next if @old_local_revisions && @old_local_revisions.include?(rev)
-	  read_lock(@mirrordir + relpath) {
-	    local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	    checkinable?(local_rcsfile, rev) {|lock_rev|
-	      unless local_rcsfile
-		if delta.state == 'dead'
-		  local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
-		else
-		  local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
-		end
-	      end
-	      tmpwork = @work.getrevision(rev, rcsinfo.working_file)
-
-	      #print "#{tmpwork} #{rev}\n"
-
-	      disable_interrupt {
-		write_lock(@mirrordir + relpath) {
-		  rcs_lock(local_rcsfile, lock_rev) if lock_rev
-		  checkin(local_rcsfile, rcsinfo, delta, tmpwork)
-		}
-	      }
-	    }
-	  }
-	}
-
-	read_lock(@mirrordir + relpath) {
-	  if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
-	    local_rcsinfo = nil
-	    head_delta = nil
-	    in_attic = nil
-	    parse_rcsfile_log(local_rcsfile) {|obj|
-	      case obj
-	      when RCSInfo
-		local_rcsinfo = obj
-	      when DeltaInfo
-		head_delta = obj if obj.revision == rcsinfo.head
-	      when NilClass
-		in_attic = head_delta.state == 'dead'
-	      else
-		raise Error.new
-	      end
-	    }
-
-	    if in_attic
-	      local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
-	    else
-	      local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
-	    end
-	    if local_rcsfile != local_rcsfile_new
-	      make_prefixdir(local_rcsfile_new)
-	      #print "#{local_rcsfile} -> #{local_rcsfile_new}\n"
-	      File.rename(local_rcsfile, local_rcsfile_new)
-	      local_rcsfile = local_rcsfile_new
-	    end
-
-	    #update_rcs_attributes(local_rcsfile, rcsinfo, local_rcsinfo)
-	    args = []
-	    if rcsinfo.default_branch != local_rcsinfo.default_branch
-	      args << "-b#{rcsinfo.default_branch}"
-	    end
-	    if rcsinfo.keyword_substitution != local_rcsinfo.keyword_substitution
-	      args << "-k#{rcsinfo.keyword_substitution}"
-	    end
-	    rcsinfo.tags.reverse_each{|sym, rev|
-	      if pair = local_rcsinfo.tags.assoc(sym)
-		if pair[1] != rev
-		  args << "-N#{sym}:#{rev}"
-		end
-	      else
-		args << "-n#{sym}:#{rev}"
-	      end
-	    }
-	    unless args.empty?
-	      args << local_rcsfile
-	      command = ["rcs", "-q"] + args
-	      #p command
-	      disable_interrupt {
-		write_lock(@mirrordir + relpath) {
-		  system *command
-		}
-	      }
-	    end
-
-	  end
-	}
-
-	begin
-	  File.unlink(tmpwork)
-	rescue Errno::ENOENT
-	end if tmpwork
+        update_file(relpath, rcsinfo, deltas)
       else
 	raise Error.new
       end
     }
   end
+
+  def update_file(relpath, rcsinfo, deltas)
+    deltas_hash = {}
+    deltas.each {|delta|
+      deltas_hash[delta.revision.split(/\./).collect! {|n| n.to_i}] = delta
+    }
+    deltas = deltas_hash.keys.sort.collect! {|key| deltas_hash[key]}
+      
+    @old_local_revisions = nil
+    tmpwork = nil
+    deltas.each {|delta|
+      rev = delta.revision
+      next if @old_local_revisions && @old_local_revisions.include?(rev)
+      read_lock(@mirrordir + relpath) {
+	local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
+	checkinable?(local_rcsfile, rev) {|lock_rev|
+	  unless local_rcsfile
+	    if delta.state == 'dead'
+	      local_rcsfile = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
+	    else
+	      local_rcsfile = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
+	    end
+	  end
+	  tmpwork = @work.getrevision(rev, rcsinfo.working_file)
+
+	  #print "#{tmpwork} #{rev}\n"
+
+	  disable_interrupt {
+	    write_lock(@mirrordir + relpath) {
+	      rcs_lock(local_rcsfile, lock_rev) if lock_rev
+	      checkin(local_rcsfile, rcsinfo, delta, tmpwork)
+	    }
+	  }
+	}
+      }
+    }
+
+    read_lock(@mirrordir + relpath) {
+      if local_rcsfile = find_rcs_file(relpath, rcsinfo.working_file)
+	local_rcsinfo = nil
+	head_delta = nil
+	in_attic = nil
+	parse_rcsfile_log(local_rcsfile) {|obj|
+	  case obj
+	  when RCSInfo
+	    local_rcsinfo = obj
+	  when DeltaInfo
+	    head_delta = obj if obj.revision == rcsinfo.head
+	  when NilClass
+	    in_attic = head_delta.state == 'dead'
+	  else
+	    raise Error.new
+	  end
+	}
+
+	if in_attic
+	  local_rcsfile_new = @mirrordir + relpath + '/Attic/' + rcsinfo.working_file + ',v'
+	else
+	  local_rcsfile_new = @mirrordir + relpath + '/' + rcsinfo.working_file + ',v'
+	end
+	if local_rcsfile != local_rcsfile_new
+	  make_prefixdir(local_rcsfile_new)
+	  #print "#{local_rcsfile} -> #{local_rcsfile_new}\n"
+	  File.rename(local_rcsfile, local_rcsfile_new)
+	  local_rcsfile = local_rcsfile_new
+	end
+
+	#update_rcs_attributes(local_rcsfile, rcsinfo, local_rcsinfo)
+	args = []
+	if rcsinfo.default_branch != local_rcsinfo.default_branch
+	  args << "-b#{rcsinfo.default_branch}"
+	end
+	if rcsinfo.keyword_substitution != local_rcsinfo.keyword_substitution
+	  args << "-k#{rcsinfo.keyword_substitution}"
+	end
+	rcsinfo.tags.reverse_each{|sym, rev|
+	  if pair = local_rcsinfo.tags.assoc(sym)
+	    if pair[1] != rev
+	      args << "-N#{sym}:#{rev}"
+	    end
+	  else
+	    args << "-n#{sym}:#{rev}"
+	  end
+	}
+	unless args.empty?
+	  args << local_rcsfile
+	  command = ["rcs", "-q"] + args
+	  #p command
+	  disable_interrupt {
+	    write_lock(@mirrordir + relpath) {
+	      system *command
+	    }
+	  }
+	end
+
+      end
+    }
+
+    begin
+      File.unlink(tmpwork)
+    rescue Errno::ENOENT
+    end if tmpwork
+  end
+
 end
 
 c = CVSMirror.new(ARGV[0], ARGV[1], ARGV[2])
