@@ -302,7 +302,7 @@ class RCSLog
 	header, *deltas = l.split(delta_delimiter)
 	header << "\n" if header !~ /\n\z/
 	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
-	raise LogFormatError.new unless /^Working file: (.*)\n/ =~ header; working_file = $1
+	raise LogFormatError.new unless /^Working file: (?:.*\/)?(.*)\n/ =~ header; working_file = $1
 	raise LogFormatError.new if /\/|\A(?:\.\.|\.)\z/ =~ working_file
 	raise LogFormatError.new unless /^head: (.*)\n/ =~ header; head = $1
 	/^branch: (.*)\n/ =~ header; default_branch = $1
@@ -350,29 +350,40 @@ end
 
 class CVSWork
   def initialize(cvsroot, tmpdir)
+    @cvsroot = cvsroot
     @tmpdir = tmpdir
     @workdir = @tmpdir.genname
+    @subdir = nil
     Dir.mkdir(@workdir)
     Dir.mkdir("#{@workdir}/CVS")
     open("#{@workdir}/CVS/Root", "w") {|f| f.print(cvsroot, "\n")}
+    open("#{@workdir}/CVS/Repository", "w") {|f| f.print(".\n")}
     @cache_filename = nil
     @cache_path = nil
   end
 
   def setup_workdir(repository)
     discard_cache
+    if @subdir
+      name = "#{@workdir}/#{@subdir}"
+      if FileTest.exist?(name)
+	system "/bin/rm", "-rf", name
+      end
+    end
+    @subdir = @subdir ? @subdir.succ : "a"
+    Dir.mkdir("#{@workdir}/#{@subdir}")
+    Dir.mkdir("#{@workdir}/#{@subdir}/CVS")
+
     @repository = repository
-    open("#{@workdir}/CVS/Repository", "w") {|f| f.print(repository, "\n")}
-    open("#{@workdir}/CVS/Entries", "w") {|f| f.print("D\n")}
-    Dir.foreach(@workdir) {|f|
-      next if /\A(\.\.|\.|CVS)\z/ =~ f
-      File.unlink("#{@workdir}/#{f}")
-    }
+    open("#{@workdir}/#{@subdir}/CVS/Root", "w") {|f| f.print(@cvsroot, "\n")}
+    open("#{@workdir}/#{@subdir}/CVS/Repository", "w") {|f| f.print(repository, "\n")}
+    open("#{@workdir}/#{@subdir}/CVS/Entries", "w") {|f| f.print("D\n")}
+    open("#{@workdir}/CVS/Entries", "w") {|f| f.print("D/#{@subdir}////\n")}
   end
 
-  def run_cvs_internal(*args)
+  def run_cvs_internal(args, env=[])
     command = ['cvs', '-f']
-    command << '-z3' unless $debug.include?(:protocollog)
+    #command << '-z3' unless $debug.include?(:protocollog)
     command += args
     p command if $debug.include?(:command)
     begin
@@ -381,6 +392,7 @@ class CVSWork
       tmperr = "#{tmpbase}.stderr"
       child = fork {
 	ENV['CVS_CLIENT_LOG'] = tmpbase if $debug.include?(:protocollog)
+	#env.each {|k, v| ENV[k] = v}
 	STDOUT.reopen(open(tmpout, "w"))
 	STDERR.reopen(open(tmperr, "w"))
 	Dir.chdir(@workdir)
@@ -397,7 +409,7 @@ class CVSWork
 
   def run_cvs_stderr(*args)
     result = nil
-    run_cvs_internal(*args) {|status, out, err|
+    run_cvs_internal(args, [['CVSCONNECT_CONNECTION', 'getsubdir']]) {|status, out, err|
       raise CVSCommandFailure.new(status) if status != 0
       open(err, 'r') {|f| result = yield f}
     }
@@ -405,7 +417,7 @@ class CVSWork
   end
 
   def run_cvs(*args)
-    run_cvs_internal(*args) {|status, out, err|
+    run_cvs_internal(args) {|status, out, err|
       raise CVSCommandFailure.new(status) if status != 0
     }
   end
@@ -422,11 +434,10 @@ class CVSWork
   def parselogs(since=nil)
     tmpfile = nil
     args = []
-    # -Q is not suitable because the message `... nothing known about ...' is diminished.
-    args << "-q" unless $debug.include?(:verbose)
     args << "log"
     args << "-d#{since}<" if since
-    run_cvs_internal(*args) {|status, out, err|
+    args << @subdir
+    run_cvs_internal(args) {|status, out, err|
       if status == 256 && (line = grepfile(err, / nothing known about /))
 	STDERR.print "warning: `cvs log' in #{@repository} is failed with a message `#{line.chomp}'\n"
       else
@@ -438,9 +449,9 @@ class CVSWork
 
   def getsubdirs
     result = []
-    self.run_cvs_stderr("update", "-r00", "-d", "-p", ".") {|f|
+    self.run_cvs_stderr("update", "-r00", "-d", "-p", @subdir) {|f|
       f.each_line {|l|
-	result << $1 if /cvs server: New directory `(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
+	result << $1 if /cvs server: New directory `#{@subdir}\/(.*)' -- ignored\n/ =~ l && /\A(?:\.|\.\.)\z/ != $1
       }
     }
     return result
@@ -450,17 +461,19 @@ class CVSWork
     discard_cache if @cache_filename != filename
     # -kb is not suitable because it prevents delta transmission.
     args = []
-    args << "-Q" unless $debug.include?(:verbose)
-    args += ["update", "-ko", "-r#{rev}", filename]
+    args += ["update", "-ko", "-r#{rev}", "#{@subdir}/#{filename}"]
     self.run_cvs(*args)
     @cache_filename = filename
-    @cache_path = "#{@workdir}/#{filename}"
+    @cache_path = "#{@workdir}/#{@subdir}/#{filename}"
     return @cache_path
   end
 
   def discard_cache
     if @cache_filename
-      File.unlink(@cache_path)
+      begin
+	File.unlink(@cache_path)
+      rescue Errno::ENOENT
+      end
       @cache_filename = nil
       @cache_path = nil
     end
@@ -1078,7 +1091,7 @@ module Planner
   end
 end
 
-$debug_list = [:command, :attic, :protocollog, :cvsout, :verbose, :leavetmp, :mkdir, :mkdir_exist]
+$debug_list = [:command, :attic, :protocollog, :cvsout, :leavetmp, :mkdir, :mkdir_exist]
 
 def usage
   STDERR.print <<"End"
