@@ -1,6 +1,6 @@
 #!/usr/local/bin/ruby
 
-# cvssuck - cvs repository retrieving tool via cvs client/server protocol
+# CVSsuck - cvs repository retrieving tool via cvs client/server protocol
 
 # author:
 #  Tanaka Akira <akr@m17n.org>
