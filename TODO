@@ -1,5 +1,14 @@
 ** short term issue
 
+* incremental rcsfile attribute update.
+
+* introduce class Tmpdir.
+
+* introduce class Revision.
+  (refine checkinable?)
+
+* handle Attic elegantly
+
 ** middle term issue
 
 * use autoconf.
@@ -20,6 +29,16 @@ double suffixed `-'s
 a-b-c	-> a-b-c
 a-b-c-	-> a-b-c--
 a-b-c--	-> a-b-c----
+
+* create a logo
+
+  cvs の魚の logo の生け作り?
+
+いけづくり【生け作り・生け造り・活け造り】
+        （1）生きたままの鯉（こい）・鯛（たい）などを頭・
+        尾・大骨はそのままに肉をそいで刺身に作り、もとの形
+        に並べた料理。いきづくり。姿づくり。
+        （2）新鮮な魚の刺身。
 
 ** long term issue
 

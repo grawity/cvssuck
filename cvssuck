@@ -376,6 +376,7 @@ class CVSMirror
 	reva = [$1.to_i, $2.to_i]
 	# it's on a maintrunk.
 	high_enough = true
+	highest = nil
 	local_revisions.each {|lrev|
 	  if /\A(\d+)\.(\d+)\z/ =~ lrev
 	    lreva = [$1.to_i, $2.to_i]
@@ -383,10 +384,13 @@ class CVSMirror
 	      high_enough = false
 	      break
 	    end
+	    if highest == nil || (highest <=> lreva) < 0
+	      highest = lreva
+	    end
 	  end
 	}
 	return unless high_enough
-	lock_rev = ''
+	lock_rev = highest.join('.')
       else
 	# it's on a branch.
 	#p rev
