@@ -15,7 +15,7 @@ a.b.c.d.e.... -> 1.1.(1000 + a).c.d.e...
 
 * support tag translation.
 
-double suffixed `-'
+double suffixed `-'s
 
 a-b-c	-> a-b-c
 a-b-c-	-> a-b-c--
