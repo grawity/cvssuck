@@ -1,0 +1,57 @@
+.TH CVSSUCK 1 "25 September 2000"
+.SH NAME
+cvssuck \- inefficient cvs repository grabber via cvs client/server protocol
+.SH SYNOPSIS
+.B cvssuck
+.RB [ -s ]
+.RB [ -t ]
+.RB [ -o 
+.IR output-directory ]
+.I cvsroot module
+.SH DESCRIPTION
+  CVSsuck grabs
+.I module
+in 
+.IR cvsroot .
+
+  CVSsuck is a cvs repository mirroring tool.  Unlike other tools such
+as CVSup or rsync, it works via cvs client/server protocol.  So, it
+doesn't require a special server or shell account.  However it is
+inefficient because cvs client/server protocol is not designed for
+mirroring.  If a server provides special way to grab a repository, you
+should use it and don't use CVSsuck.
+
+  CVSsuck can translate revision numbers and tags when mirroring.  For
+example, it can copy the revision 1.1 in remote repository to the
+revision 1.1.1001.1 in local repository.  This makes development with
+local repository possible.  In other words, CVSsuck can be used as
+replacement of `cvs import'.  If CVSsuck is used instead, you can refer
+logs, original tags, revisions between releases, etc.
+
+  Note that `cvs import' works well with CVSsuck until 1000th vendor
+branch is created :-)
+
+.SH OPTIONS
+.TP
+.B \-s
+specifies skeleton mode.
+.TP
+.B \-t
+specifies revision/tag translation mode.
+.TP
+.B \-o
+specifies output directory.
+The default is 
+.IR module .
+.SH EXIT STATUS
+.SH EXAMPLES
+.SH SEE ALSO
+.BR cvs ( 1 ),
+.BR rcs ( 1 ),
+.BR cvsup ( 1 ),
+.BR rsync ( 1 )
+.SH AUTHORS
+Tanaka Akira <akr@m17n.org>.
+.SH BUGS
+It's inefficient.
+
