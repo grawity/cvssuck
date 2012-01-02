@@ -355,10 +355,10 @@ class RCSLog
 	  raise LogFormatError.new unless /\Arevision ([.\d]*).*\n/ =~ r
 	  revision = $1
 	  r = $'
-	  raise LogFormatError.new unless /\Adate: (\d+\/\d+\/\d+ \d+:\d+:\d+);  author: ([a-zA-Z0-9_\-.]+);  state: (\w+);.*\n/ =~ r
+	  raise LogFormatError.new unless /\Adate: ((\d+[\/-]\d+[\/-]\d+ \d+:\d+:\d+)( [+-]?\d+)?);  author: ([a-zA-Z0-9_\-.]+);  state: (\w+);.*\n/ =~ r
 	  date = $1
-	  author = $2
-	  state = $3
+	  author = $4
+	  state = $5
 	  r = $'
 	  if /\Abranches:\s*(.*);\n/ =~ r
 	    r = $'
