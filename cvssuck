@@ -332,6 +332,9 @@ class RCSLog
       while l = f.gets(file_delimiter)
 	l.chomp!(file_delimiter)
 	l.chomp!(delta_delimiter)
+	if !l.valid_encoding?
+	  l.force_encoding("iso8859-1")
+	end
 	header, *deltas = l.split(/#{delta_delimiter}\n(?=revision )/o)
 	header << "\n" if header !~ /\n\z/
 	raise LogFormatError.new unless /^RCS file: (.*)\n/ =~ header; rcs_file = $1
